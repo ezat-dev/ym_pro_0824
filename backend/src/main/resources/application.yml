@@ -1,0 +1,20 @@
+server:
+  port: 9090
+
+spring:
+  application:
+    name: mes-backend
+  datasource:
+    driver-class-name: org.mariadb.jdbc.Driver
+    # 접속 정보는 환경변수로 주입한다(레포에 실제 비밀번호를 커밋하지 않기 위함).
+    # 실행 전: DB_USERNAME, DB_PASSWORD 필수 / DB_HOST, DB_PORT, DB_NAME은 기본값 있음
+    url: jdbc:mariadb://${DB_HOST:192.168.1.19}:${DB_PORT:3306}/${DB_NAME:db_ym_pro}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      # DB가 아직 준비되지 않아도 서버 기동은 되도록 함
+      initialization-fail-timeout: -1
+
+logging:
+  level:
+    com.mes: debug

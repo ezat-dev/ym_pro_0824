@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="AuthMapper">
+
+    <!-- 기준정보 > 사용자권한 (base_auth) -->
+
+    <select id="selectByUserId" resultType="com.mes.domain.base.Auth">
+        SELECT auth_id, user_id, menu_path, can_create, can_read, can_update, can_delete
+        FROM base_auth
+        WHERE user_id = #{userId}
+    </select>
+
+    <delete id="deleteByUserId">
+        DELETE FROM base_auth WHERE user_id = #{userId}
+    </delete>
+
+    <insert id="insertBatch" parameterType="map">
+        INSERT INTO base_auth (user_id, menu_path, can_create, can_read, can_update, can_delete, reg_dt, upd_dt)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{userId}, #{item.menuPath}, #{item.canCreate}, #{item.canRead}, #{item.canUpdate}, #{item.canDelete}, NOW(), NOW())
+        </foreach>
+    </insert>
+
+</mapper>

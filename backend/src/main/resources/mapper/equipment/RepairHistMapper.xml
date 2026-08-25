@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="RepairHistMapper">
+
+    <!-- 설비관리 > 수리이력관리 (equipment_repair_hist) -->
+
+    <select id="selectList" parameterType="map" resultType="com.mes.domain.equipment.RepairHist">
+        SELECT id, use_yn, reg_dt, upd_dt
+        FROM equipment_repair_hist
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND id LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectCount" parameterType="map" resultType="long">
+        SELECT COUNT(*)
+        FROM equipment_repair_hist
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND id LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+        </where>
+    </select>
+
+</mapper>

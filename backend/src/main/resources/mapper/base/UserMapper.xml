@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="UserMapper">
+
+    <!-- 기준정보 > 사용자관리 (base_user) -->
+
+    <select id="selectList" parameterType="map" resultType="com.mes.domain.base.User">
+        SELECT user_id, login_id, user_name, dept_name, phone, email, use_yn, reg_dt, upd_dt
+        FROM base_user
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (login_id LIKE CONCAT('%', #{keyword}, '%')
+                     OR user_name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY user_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectCount" parameterType="map" resultType="long">
+        SELECT COUNT(*)
+        FROM base_user
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (login_id LIKE CONCAT('%', #{keyword}, '%')
+                     OR user_name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="com.mes.domain.base.User">
+        SELECT user_id, login_id, password, user_name, dept_name, phone, email, use_yn, reg_dt, upd_dt
+        FROM base_user
+        WHERE user_id = #{userId}
+    </select>
+
+    <select id="selectByLoginId" resultType="com.mes.domain.base.User">
+        SELECT user_id, login_id, password, user_name, dept_name, phone, email, use_yn, reg_dt, upd_dt
+        FROM base_user
+        WHERE login_id = #{loginId}
+    </select>
+
+    <insert id="insert" parameterType="com.mes.domain.base.User" useGeneratedKeys="true" keyProperty="userId">
+        INSERT INTO base_user (login_id, password, user_name, dept_name, phone, email, use_yn, reg_dt, upd_dt)
+        VALUES (#{loginId}, #{password}, #{userName}, #{deptName}, #{phone}, #{email}, #{useYn}, NOW(), NOW())
+    </insert>
+
+    <update id="update" parameterType="com.mes.domain.base.User">
+        UPDATE base_user
+        SET user_name = #{userName},
+            dept_name = #{deptName},
+            phone = #{phone},
+            email = #{email},
+            use_yn = #{useYn},
+            upd_dt = NOW()
+            <if test="password != null and password != ''">
+                , password = #{password}
+            </if>
+        WHERE user_id = #{userId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM base_user WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

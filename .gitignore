@@ -1,0 +1,6 @@
+.DS_Store
+Thumbs.db
+*.log
+
+# VS Code Java Upgrade 확장이 세션 중 자동 생성하는 폴더(프로젝트와 무관)
+.github/modernize/
