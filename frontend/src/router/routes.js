@@ -10,6 +10,7 @@ import IntegratedPage from '../pages/monitoring/IntegratedPage';
 import AlarmPage from '../pages/monitoring/AlarmPage';
 import AlarmRankPage from '../pages/monitoring/AlarmRankPage';
 import TrendPage from '../pages/monitoring/TrendPage';
+import TrendSettingsPage from '../pages/monitoring/TrendSettingsPage';
 import LotStatusPage from '../pages/monitoring/LotStatusPage';
 import LotTrackingPage from '../pages/monitoring/LotTrackingPage';
 import WorkOrderPage from '../pages/production/WorkOrderPage';
@@ -50,6 +51,7 @@ const menuRoutes = [
   { path: 'monitoring/alarm', element: AlarmPage },
   { path: 'monitoring/alarmRank', element: AlarmRankPage },
   { path: 'monitoring/trend', element: TrendPage },
+  { path: 'monitoring/trendSettings', element: TrendSettingsPage },
   { path: 'monitoring/lotStatus', element: LotStatusPage },
   { path: 'monitoring/lotTracking', element: LotTrackingPage },
   { path: 'production/workOrder', element: WorkOrderPage },

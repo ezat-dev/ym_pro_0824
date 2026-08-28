@@ -2,28 +2,262 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="AlarmMapper">
 
-    <!-- 모니터링 > 경보모니터링 (monitoring_alarm) -->
+    <!-- 모니터링 > 경보모니터링 / 경보랭킹 — ez_scada.tb_alarm_folder / tb_alarm_tag / tb_plc / tb_alarm_history.
+         sample_pro(mybatis/mapper/monitor/AlarmMapper.xml)와 같은 물리 테이블을 그대로 공유한다. -->
 
+    <!-- ── 알람 이력 목록 (기존 목록 API, 페이징) ── -->
     <select id="selectList" parameterType="map" resultType="com.mes.domain.monitoring.Alarm">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM monitoring_alarm
+        SELECT h.history_id, h.tag_id, t.tag_name, t.address, t.alarm_msg, t.level, t.plc_id,
+               t.folder_id, f.folder_name,
+               h.occur_time, h.clear_time, h.ack_time, h.ack_user, h.value_at_occur
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
         <where>
             <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
+                AND t.tag_name LIKE CONCAT('%', #{keyword}, '%')
             </if>
         </where>
-        ORDER BY id DESC
+        ORDER BY h.occur_time DESC
         LIMIT #{size} OFFSET #{offset}
     </select>
 
     <select id="selectCount" parameterType="map" resultType="long">
         SELECT COUNT(*)
-        FROM monitoring_alarm
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
         <where>
             <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
+                AND t.tag_name LIKE CONCAT('%', #{keyword}, '%')
             </if>
         </where>
+    </select>
+
+    <!-- ── 폴더 ── -->
+    <select id="selectAlarmFolderList" resultType="com.mes.domain.monitoring.AlarmFolder">
+        SELECT folder_id, folder_name, parent_id, sort_order, created_at, updated_at
+        FROM tb_alarm_folder
+        ORDER BY folder_name ASC
+    </select>
+
+    <insert id="insertAlarmFolder" parameterType="com.mes.domain.monitoring.AlarmFolder"
+            useGeneratedKeys="true" keyProperty="folderId">
+        INSERT IGNORE INTO tb_alarm_folder (folder_name, parent_id, sort_order)
+        VALUES (#{folderName}, #{parentId}, #{sortOrder})
+    </insert>
+
+    <delete id="deleteAlarmFolder" parameterType="int">
+        DELETE FROM tb_alarm_folder WHERE folder_id = #{value}
+    </delete>
+
+    <!-- ── 태그 ── -->
+    <select id="selectAlarmTagList" parameterType="int" resultType="com.mes.domain.monitoring.AlarmTag">
+        SELECT tag_id, folder_id, tag_name, address, plc_id, alarm_msg, level, enabled, created_at, updated_at
+        FROM tb_alarm_tag
+        WHERE folder_id = #{value}
+        ORDER BY tag_id ASC
+    </select>
+
+    <insert id="insertAlarmTag" parameterType="com.mes.domain.monitoring.AlarmTag"
+            useGeneratedKeys="true" keyProperty="tagId">
+        INSERT INTO tb_alarm_tag (folder_id, tag_name, address, plc_id, alarm_msg, level, enabled)
+        VALUES (#{folderId}, #{tagName}, #{address}, #{plcId}, #{alarmMsg}, #{level}, #{enabled})
+        ON DUPLICATE KEY UPDATE
+            address   = VALUES(address),
+            plc_id    = VALUES(plc_id),
+            alarm_msg = VALUES(alarm_msg),
+            level     = VALUES(level),
+            enabled   = VALUES(enabled)
+    </insert>
+
+    <update id="updateAlarmTag" parameterType="com.mes.domain.monitoring.AlarmTag">
+        UPDATE tb_alarm_tag
+        SET tag_name = #{tagName}, address = #{address}, plc_id = #{plcId},
+            alarm_msg = #{alarmMsg}, level = #{level}, enabled = #{enabled}
+        WHERE tag_id = #{tagId}
+    </update>
+
+    <delete id="deleteAlarmTag" parameterType="int">
+        DELETE FROM tb_alarm_tag WHERE tag_id = #{value}
+    </delete>
+
+    <!-- ── PLC 레지스트리 (조건관리 > 조절계 관리와 tb_plc 공유, 읽기/쓰기 경로는 독립) ── -->
+    <select id="selectPlcList" resultType="com.mes.domain.monitoring.PlcDevice">
+        SELECT plc_id, ip, port, plc_type, label, enabled
+        FROM tb_plc
+        ORDER BY plc_id ASC
+    </select>
+
+    <insert id="insertOrUpdatePlc" parameterType="com.mes.domain.monitoring.PlcDevice">
+        INSERT INTO tb_plc (plc_id, ip, port, plc_type, label, enabled)
+        VALUES (#{plcId}, #{ip}, #{port}, #{plcType}, #{label}, #{enabled})
+        ON DUPLICATE KEY UPDATE
+            ip = VALUES(ip), port = VALUES(port), plc_type = VALUES(plc_type),
+            label = VALUES(label), enabled = VALUES(enabled)
+    </insert>
+
+    <delete id="deletePlc" parameterType="string">
+        DELETE FROM tb_plc WHERE plc_id = #{value}
+    </delete>
+
+    <!-- ── 활성 알람 / 이력 ── -->
+    <select id="selectActiveAlarms" parameterType="map" resultType="com.mes.domain.monitoring.Alarm">
+        SELECT h.history_id, h.tag_id, t.tag_name, t.address, t.alarm_msg, t.level, t.plc_id,
+               t.folder_id, f.folder_name,
+               h.occur_time, h.clear_time, h.ack_time, h.ack_user, h.value_at_occur
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.clear_time IS NULL
+        ORDER BY h.occur_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectAlarmHistory" parameterType="map" resultType="com.mes.domain.monitoring.Alarm">
+        SELECT h.history_id, h.tag_id, t.tag_name, t.address, t.alarm_msg, t.level, t.plc_id,
+               t.folder_id, f.folder_name,
+               h.occur_time, h.clear_time, h.ack_time, h.ack_user, h.value_at_occur
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        ORDER BY h.occur_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 기간 지정 이력 조회 (경보모니터링 대시보드 이력 테이블) — from/to는 분 단위까지 정확한
+         datetime 문자열로 온다("YYYY-MM-DD HH:mm:00"), 날짜 전용 문자열을 가정한 +1일 보정이 필요 없다. -->
+    <select id="selectAlarmHistoryRange" parameterType="map" resultType="com.mes.domain.monitoring.Alarm">
+        SELECT h.history_id, h.tag_id, t.tag_name, t.address, t.alarm_msg, t.level, t.plc_id,
+               t.folder_id, f.folder_name,
+               h.occur_time, h.clear_time, h.ack_time, h.ack_user, h.value_at_occur
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt;= #{to}
+        ORDER BY h.occur_time DESC
+    </select>
+
+    <!-- ── 경보랭킹: 서버 사이드 GROUP BY (sample_pro의 1000행 클라이언트 집계 방식 대체) ── -->
+    <select id="selectAlarmRankByTag" parameterType="map" resultType="com.mes.domain.monitoring.AlarmRank">
+        SELECT t.tag_name AS groupKey, t.tag_name AS label,
+               COUNT(*) AS count, MAX(h.occur_time) AS lastOccurTime
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; DATE_ADD(#{to}, INTERVAL 1 DAY)
+        GROUP BY t.tag_id, t.tag_name
+        ORDER BY count DESC
+        LIMIT 10
+    </select>
+
+    <select id="selectAlarmRankByPlc" parameterType="map" resultType="com.mes.domain.monitoring.AlarmRank">
+        SELECT t.plc_id AS groupKey, COALESCE(p.label, t.plc_id) AS label,
+               COUNT(*) AS count, MAX(h.occur_time) AS lastOccurTime
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        LEFT JOIN tb_plc p ON t.plc_id = p.plc_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; DATE_ADD(#{to}, INTERVAL 1 DAY)
+        GROUP BY t.plc_id, p.label
+        ORDER BY count DESC
+        LIMIT 10
+    </select>
+
+    <!-- ── 설비(tb_alarm_folder)별 랭킹 — "PLC별"이 아니라 폴더(=실제 설비 단위, 예: BCF1~12) 기준.
+         한 PLC가 여러 설비를 함께 제어하는 배치(현재 미쓰비시 PLC 1대가 BCF1~12 전부를 담당)라
+         plc_id로 묶으면 사실상 항상 1행이라 무의미 — folder_id가 진짜 "설비" 구분자다.
+         폴더 개수가 적은 내부 설비관리 툴이라 TOP-N으로 자르지 않고 전체를 반환한다. -->
+    <select id="selectAlarmRankByFolder" parameterType="map" resultType="com.mes.domain.monitoring.AlarmRank">
+        SELECT t.folder_id AS groupKey, f.folder_name AS label,
+               COUNT(*) AS count, MAX(h.occur_time) AS lastOccurTime
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; DATE_ADD(#{to}, INTERVAL 1 DAY)
+        GROUP BY t.folder_id, f.folder_name
+        ORDER BY count DESC
+    </select>
+
+    <!-- ── 설비별 최다 발생 메시지 (대시보드 "설비별 최다 메시지" 카드 / 경보랭킹 상세용) ──
+         설비(폴더)-메시지 조합별 건수를 전부 반환한다. "설비당 top-N" 슬라이싱은 호출부(자바/프론트)에서 한다. -->
+    <select id="selectAlarmMessageCountsByFolder" parameterType="map" resultType="map">
+        SELECT t.folder_id AS folderId, f.folder_name AS folderLabel,
+               t.alarm_msg AS alarmMsg, COUNT(*) AS cnt, MAX(h.occur_time) AS lastOccurTime
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; DATE_ADD(#{to}, INTERVAL 1 DAY)
+        GROUP BY t.folder_id, f.folder_name, t.alarm_msg
+        ORDER BY t.folder_id ASC, cnt DESC
+    </select>
+
+    <!-- ── 전체 발생 추이 (대시보드 "24시간 추이" 카드) — 시간대별 총 건수, 설비 구분 없음 ── -->
+    <select id="selectAlarmTrendOverall" parameterType="map" resultType="map">
+        SELECT DATE_FORMAT(h.occur_time, '%Y-%m-%d %H:00:00') AS bucket, COUNT(*) AS cnt
+        FROM tb_alarm_history h
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; #{to}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+    </select>
+
+    <!-- ── 설비별 발생 추이 (경보랭킹 "설비별 추이" 차트) — bucketUnit: HOUR(당일) 또는 DAY(주/월/전체) ── -->
+    <select id="selectAlarmTrendByFolder" parameterType="map" resultType="map">
+        SELECT t.folder_id AS folderId, f.folder_name AS folderLabel,
+               <choose>
+                   <when test="bucketUnit == 'HOUR'">DATE_FORMAT(h.occur_time, '%Y-%m-%d %H:00:00')</when>
+                   <otherwise>DATE_FORMAT(h.occur_time, '%Y-%m-%d')</otherwise>
+               </choose> AS bucket,
+               COUNT(*) AS cnt
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; DATE_ADD(#{to}, INTERVAL 1 DAY)
+        GROUP BY t.folder_id, f.folder_name, bucket
+        ORDER BY bucket ASC, t.folder_id ASC
+    </select>
+
+    <!-- ── 시간대별 발생 추이(심각도별) — 대시보드 메인 차트. level 1/2/3별 건수를 시간 버킷별로.
+         빈 시간대·빈 레벨을 0으로 채우는 건 자바 쪽(getAlarmTrendBySeverity)에서 한다. ── -->
+    <select id="selectAlarmTrendBySeverity" parameterType="map" resultType="map">
+        SELECT DATE_FORMAT(h.occur_time, '%Y-%m-%d %H:00:00') AS bucket,
+               t.level AS level, COUNT(*) AS cnt
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; #{to}
+        GROUP BY bucket, t.level
+        ORDER BY bucket ASC
+    </select>
+
+    <!-- ── 설비별 알람 건수(심각도별) — 대시보드 수평 누적 막대 차트 ── -->
+    <select id="selectAlarmCountByFolderSeverity" parameterType="map" resultType="map">
+        SELECT t.folder_id AS folderId, f.folder_name AS folderLabel,
+               t.level AS level, COUNT(*) AS cnt
+        FROM tb_alarm_history h
+        JOIN tb_alarm_tag t ON h.tag_id = t.tag_id
+        JOIN tb_alarm_folder f ON t.folder_id = f.folder_id
+        WHERE h.occur_time >= #{from}
+          AND h.occur_time &lt; #{to}
+        GROUP BY t.folder_id, f.folder_name, t.level
+        ORDER BY t.folder_id ASC
+    </select>
+
+    <!-- ── 알람 응답(해제 소요) 시간 추이 — 해제된 알람만 대상으로 발생~해제 시간차(분) 평균 ── -->
+    <select id="selectAlarmResponseTimeTrend" parameterType="map" resultType="map">
+        SELECT DATE_FORMAT(h.occur_time, '%Y-%m-%d %H:00:00') AS bucket,
+               AVG(TIMESTAMPDIFF(MINUTE, h.occur_time, h.clear_time)) AS avgMinutes,
+               COUNT(*) AS cnt
+        FROM tb_alarm_history h
+        WHERE h.clear_time IS NOT NULL
+          AND h.occur_time >= #{from}
+          AND h.occur_time &lt; #{to}
+        GROUP BY bucket
+        ORDER BY bucket ASC
     </select>
 
 </mapper>

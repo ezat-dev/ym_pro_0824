@@ -4,7 +4,7 @@
 
 ## 기술 스택
 
-- Backend: Java 21, Spring Boot 3.5.x, MyBatis(수동 SqlSession + Dao/DaoImpl), MariaDB
+- Backend: Java 17, Spring Boot 3.5.x, MyBatis(수동 SqlSession + Dao/DaoImpl), MariaDB
 - Frontend: React 18, Vite, React Router, Tabulator(테이블), Axios
 
 ## 폴더 구조

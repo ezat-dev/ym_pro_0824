@@ -1,0 +1,17 @@
+@echo off
+REM Copy this file to run-backend.bat and set the real DB_PASSWORD below.
+REM run-backend.bat is gitignored so real credentials never get committed.
+title MES Backend (9090)
+set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+set "PATH=%JAVA_HOME%\bin;%PATH%"
+set "DB_USERNAME=root"
+set "DB_PASSWORD=your-password-here"
+set "EZSCADA_DB_USERNAME=root"
+set "EZSCADA_DB_PASSWORD=your-password-here"
+REM Local dev default is root/1234 - update if your MariaDB uses something else
+cd /d "%~dp0backend"
+call "%cd%\gradlew.bat" bootRun
+
+echo.
+echo [backend process exited - see log above. Press any key to close this window]
+pause >nul

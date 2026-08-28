@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="TrendSettingsMapper">
+
+    <!-- 모니터링 > 트렌드 설정 — ez_scada.tb_temp_tag / tb_temp_snapshot / tb_temp_memo.
+         TREND 차트가 그리는 온도 태그의 등록/관리 화면. sample_pro(TempMapper.xml)와 같은 물리 테이블 공유. -->
+
+    <!-- ── 스키마 자동 관리 (sample_pro TempServiceImpl.ensureTables()와 동일) ── -->
+
+    <update id="ensureTempTagTable" statementType="STATEMENT">
+        CREATE TABLE IF NOT EXISTS tb_temp_tag (
+            temp_id    INT AUTO_INCREMENT PRIMARY KEY,
+            tag_name   VARCHAR(100) NOT NULL,
+            address    VARCHAR(50)  NOT NULL,
+            plc_id     VARCHAR(50)  NOT NULL,
+            col_name   VARCHAR(120) NOT NULL,
+            enabled    TINYINT NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_temp_tag (plc_id, address),
+            UNIQUE KEY uk_temp_col (col_name)
+        )
+    </update>
+
+    <select id="countTempTagColumn" parameterType="string" resultType="int">
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'tb_temp_tag'
+          AND column_name = #{colName}
+    </select>
+
+    <update id="addTempTagColNameColumn" statementType="STATEMENT">
+        ALTER TABLE tb_temp_tag ADD COLUMN col_name VARCHAR(120) NOT NULL DEFAULT ''
+    </update>
+
+    <update id="addTempTagEquipIdColumn" statementType="STATEMENT">
+        ALTER TABLE tb_temp_tag ADD COLUMN equip_id VARCHAR(20) NULL DEFAULT NULL
+    </update>
+
+    <update id="addTempTagScaleColumn" statementType="STATEMENT">
+        ALTER TABLE tb_temp_tag ADD COLUMN scale VARCHAR(20) NULL DEFAULT NULL
+    </update>
+
+    <update id="ensureTempSnapshotTable" statementType="STATEMENT">
+        CREATE TABLE IF NOT EXISTS tb_temp_snapshot (
+            snapshot_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            record_time DATETIME DEFAULT NULL,
+            INDEX idx_snap_time (record_time)
+        )
+    </update>
+
+    <update id="addTempSnapshotColumn" parameterType="string" statementType="STATEMENT">
+        ALTER TABLE tb_temp_snapshot ADD COLUMN `${colName}` DOUBLE NULL DEFAULT NULL
+    </update>
+
+    <select id="countTempSnapshotColumn" parameterType="string" resultType="int">
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'tb_temp_snapshot'
+          AND column_name = #{colName}
+    </select>
+
+    <update id="renameTempSnapshotColumn" parameterType="map" statementType="STATEMENT">
+        ALTER TABLE tb_temp_snapshot CHANGE COLUMN `${oldCol}` `${newCol}` DOUBLE
+    </update>
+
+    <!-- ── 태그 CRUD ── -->
+
+    <select id="selectTempTagFullList" resultType="com.mes.domain.monitoring.TempTag">
+        SELECT temp_id, tag_name, address, plc_id, col_name, trend_name, equip_id, scale, enabled,
+               created_at, updated_at
+        FROM tb_temp_tag
+        ORDER BY temp_id ASC
+    </select>
+
+    <select id="selectTempTagById" parameterType="int" resultType="com.mes.domain.monitoring.TempTag">
+        SELECT temp_id, tag_name, address, plc_id, col_name, trend_name, equip_id, scale, enabled,
+               created_at, updated_at
+        FROM tb_temp_tag
+        WHERE temp_id = #{tempId}
+        LIMIT 1
+    </select>
+
+    <select id="selectTempTagsMissingColName" resultType="com.mes.domain.monitoring.TempTag">
+        SELECT temp_id, tag_name, address, plc_id, col_name, trend_name, equip_id, scale, enabled,
+               created_at, updated_at
+        FROM tb_temp_tag
+        WHERE col_name IS NULL OR col_name = ''
+    </select>
+
+    <select id="selectTempColNames" resultType="string">
+        SELECT col_name FROM tb_temp_tag
+    </select>
+
+    <insert id="insertTempTag" parameterType="com.mes.domain.monitoring.TempTag"
+            useGeneratedKeys="true" keyProperty="tempId">
+        INSERT INTO tb_temp_tag (tag_name, address, plc_id, col_name, trend_name, equip_id, scale, enabled)
+        VALUES (#{tagName}, #{address}, #{plcId}, #{colName}, #{trendName}, #{equipId}, #{scale}, #{enabled})
+        ON DUPLICATE KEY UPDATE
+            tag_name   = VALUES(tag_name),
+            col_name   = VALUES(col_name),
+            trend_name = VALUES(trend_name),
+            equip_id   = VALUES(equip_id),
+            scale      = VALUES(scale),
+            enabled    = VALUES(enabled)
+    </insert>
+
+    <update id="updateTempTag" parameterType="com.mes.domain.monitoring.TempTag">
+        UPDATE tb_temp_tag
+        SET tag_name   = #{tagName},
+            address    = #{address},
+            plc_id     = #{plcId},
+            col_name   = #{colName},
+            trend_name = #{trendName},
+            equip_id   = #{equipId},
+            scale      = #{scale},
+            enabled    = #{enabled}
+        WHERE temp_id = #{tempId}
+    </update>
+
+    <delete id="deleteTempTag" parameterType="int">
+        DELETE FROM tb_temp_tag WHERE temp_id = #{tempId}
+    </delete>
+
+    <!-- ── 스냅샷 ── -->
+
+    <select id="selectTempSnapshotList" parameterType="map" resultType="hashmap">
+        SELECT *
+        FROM tb_temp_snapshot
+        ORDER BY record_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectTempSnapshotRange" parameterType="map" resultType="hashmap">
+        SELECT *
+        FROM tb_temp_snapshot
+        WHERE record_time BETWEEN #{from} AND #{to}
+        ORDER BY record_time ASC
+    </select>
+
+    <!-- ── 메모 (트렌드 차트 주석) ── -->
+
+    <select id="selectMemoList" parameterType="map" resultType="com.mes.domain.monitoring.TempMemo">
+        SELECT tc_cnt, tc_regtime, tc_name, tc_desc, tc_user_code, tc_user_name, tc_yn
+        FROM tb_temp_memo
+        WHERE tc_yn = 'Y'
+          AND tc_regtime BETWEEN #{from} AND #{to}
+        ORDER BY tc_regtime ASC
+    </select>
+
+    <insert id="insertMemo" parameterType="com.mes.domain.monitoring.TempMemo"
+            useGeneratedKeys="true" keyProperty="tcCnt">
+        INSERT INTO tb_temp_memo (tc_regtime, tc_name, tc_desc, tc_user_code, tc_user_name, tc_yn)
+        VALUES (#{tcRegtime}, #{tcName}, #{tcDesc}, #{tcUserCode}, #{tcUserName}, 'Y')
+    </insert>
+
+    <update id="deleteMemo" parameterType="int">
+        UPDATE tb_temp_memo SET tc_yn = 'N' WHERE tc_cnt = #{value}
+    </update>
+
+</mapper>

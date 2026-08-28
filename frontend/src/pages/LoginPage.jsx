@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { IconLock, IconUser, IconHexagon, IconPhoto } from '@tabler/icons-react';
+import { IconLock, IconUser, IconHexagon, IconShieldCheck } from '@tabler/icons-react';
 import { useAuth } from '../context/AuthContext';
 import { login as loginApi } from '../api/authClient';
+import LoginNetworkDiagram from '../components/LoginNetworkDiagram';
 import './LoginPage.css';
 
 export default function LoginPage() {
@@ -38,84 +39,96 @@ export default function LoginPage() {
 
   return (
     <div className="login-screen">
-      {/* 좌측 브랜드 패널 — 회사 로고/사진 전달되면 이 영역만 교체 */}
-      <div className="login-brand">
-        <div className="login-brand-top">
-          <div className="login-logo-slot">
-            <IconHexagon size={22} />
+      <div className="login-card">
+        {/* 좌측 브랜드 패널 — 회사 로고/사진 전달되면 이 영역만 교체 */}
+        <div className="login-brand">
+          <div className="login-brand-top">
+            <div className="login-logo-slot">
+              <IconHexagon size={22} />
+            </div>
+            <span className="login-brand-name">SMART MES</span>
           </div>
-          <span className="login-brand-name">SMART MES</span>
+
+          <div className="login-brand-middle">
+            <LoginNetworkDiagram />
+          </div>
+
+          <div className="login-brand-bottom">© 2026 회사명이 들어갈 자리. All rights reserved.</div>
         </div>
 
-        <div className="login-brand-middle">
-          <h1 className="login-brand-headline">
-            제조 현장의 모든 데이터를
-            <br />
-            한 화면에서 관리하세요
-          </h1>
-          <p className="login-brand-sub">
-            생산·설비·품질·조건관리 데이터를 통합 모니터링하고
-            <br />
-            메뉴별 권한을 세밀하게 관리할 수 있는 관리자 시스템입니다.
-          </p>
+        {/* 우측 로그인 폼 */}
+        <div className="login-form-panel">
+          <div className="login-form-box">
+            <div className="login-mobile-brand">
+              <div className="login-logo-slot" style={{ borderColor: 'var(--mes-border)', color: 'var(--mes-accent)' }}>
+                <IconHexagon size={20} />
+              </div>
+              <span style={{ fontWeight: 700, color: 'var(--mes-text)' }}>SMART MES</span>
+            </div>
 
-          <div className="login-brand-photo-slot">
-            <IconPhoto size={28} style={{ flexShrink: 0 }} />
-            <span>회사 사진 / 로고 전달 후 이 영역에 배치 예정 (login-brand 배경 교체)</span>
+            <span className="login-form-badge">사용자 로그인</span>
+            <h2 className="login-form-title">로그인</h2>
+            <p className="login-form-desc">
+              등록된 계정으로 로그인 후 시스템에 접속하세요.
+              <br />
+              권한에 따라 메뉴와 기능이 자동으로 적용됩니다.
+            </p>
+
+            <form onSubmit={handleSubmit}>
+              <div className="login-field">
+                <label className="login-field-label">아이디</label>
+                <div className="login-field-control">
+                  <IconUser size={16} />
+                  <input
+                    placeholder="아이디를 입력하세요"
+                    value={loginId}
+                    onChange={(e) => setLoginId(e.target.value)}
+                    autoFocus
+                    autoComplete="username"
+                  />
+                </div>
+              </div>
+              <div className="login-field">
+                <label className="login-field-label">비밀번호</label>
+                <div className="login-field-control">
+                  <IconLock size={16} />
+                  <input
+                    type="password"
+                    placeholder="비밀번호를 입력하세요"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+              </div>
+
+              <label className="login-remember">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                로그인 상태 유지
+              </label>
+
+              {error && <div className="login-error">{error}</div>}
+
+              <button type="submit" className="login-submit" disabled={submitting}>
+                {submitting ? '로그인 중...' : 'MES 로그인'}
+              </button>
+            </form>
+
+            <div className="login-security-notice">
+              <IconShieldCheck size={18} />
+              <div>
+                <div className="login-security-notice-title">보안 안내</div>
+                <div className="login-security-notice-desc">
+                  인증된 사용자만 접근할 수 있으며 로그인 기록이 자동으로 저장됩니다. 로그인 실패가 반복되면 시스템관리팀에 문의하세요.
+                </div>
+              </div>
+            </div>
+
+            <div className="login-footer">
+              <span>문의: 시스템관리팀 · 사내 폐쇄망 전용</span>
+              <span className="login-footer-tag">Confidential</span>
+            </div>
           </div>
-        </div>
-
-        <div className="login-brand-bottom">© 2026 회사명이 들어갈 자리. All rights reserved.</div>
-      </div>
-
-      {/* 우측 로그인 폼 */}
-      <div className="login-form-panel">
-        <div className="login-form-box">
-          <div className="login-mobile-brand">
-            <div className="login-logo-slot" style={{ borderColor: 'var(--mes-border)', color: 'var(--mes-accent)' }}>
-              <IconHexagon size={20} />
-            </div>
-            <span style={{ fontWeight: 700, color: 'var(--mes-text)' }}>SMART MES</span>
-          </div>
-
-          <h2 className="login-form-title">로그인</h2>
-          <p className="login-form-desc">사내 MES 관리자 시스템에 접속합니다.</p>
-
-          <form onSubmit={handleSubmit}>
-            <div className="login-field">
-              <IconUser size={16} />
-              <input
-                placeholder="아이디"
-                value={loginId}
-                onChange={(e) => setLoginId(e.target.value)}
-                autoFocus
-                autoComplete="username"
-              />
-            </div>
-            <div className="login-field">
-              <IconLock size={16} />
-              <input
-                type="password"
-                placeholder="비밀번호"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-
-            <label className="login-remember">
-              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              로그인 상태 유지
-            </label>
-
-            {error && <div className="login-error">{error}</div>}
-
-            <button type="submit" className="login-submit" disabled={submitting}>
-              {submitting ? '로그인 중...' : '로그인'}
-            </button>
-          </form>
-
-          <div className="login-footer">문의: 시스템관리팀 · 사내 폐쇄망 전용</div>
         </div>
       </div>
     </div>

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { IconPlus, IconSearch, IconUsers, IconUserCheck, IconUserOff } from '@tabler/icons-react';
-import DataTable from '../../components/ui/DataTable';
+import { IconPlus, IconSearch, IconUsers, IconUserCheck, IconUserOff, IconArrowUp, IconArrowDown } from '@tabler/icons-react';
 import Modal from '../../components/ui/Modal';
 import Toast from '../../components/ui/Toast';
 import { useToast } from '../../hooks/useToast';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { getList, createUser, updateUser, deleteUser } from '../../api/base/userApi';
 
 const EMPTY_FORM = {
@@ -16,6 +16,20 @@ const EMPTY_FORM = {
   useYn: 'Y',
 };
 
+const COLUMNS = [
+  { key: 'userName', label: '사용자', sortable: true },
+  { key: 'deptName', label: '부서', sortable: true },
+  { key: 'phone', label: '연락처', sortable: false },
+  { key: 'email', label: '이메일', sortable: false },
+  { key: 'useYn', label: '상태', sortable: true, align: 'center' },
+  { key: 'regDt', label: '등록일', sortable: true },
+  { key: 'actions', label: '관리', sortable: false, align: 'center' },
+];
+
+function formatDt(v) {
+  return v ? String(v).replace('T', ' ').slice(0, 16) : '';
+}
+
 export default function UserPage() {
   const [users, setUsers] = useState([]);
   const [keyword, setKeyword] = useState('');
@@ -25,7 +39,10 @@ export default function UserPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState('asc');
   const { toast, showToast } = useToast();
+  const { visibleCount, onScroll, reset: resetVisible } = useInfiniteScroll();
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -51,6 +68,32 @@ export default function UserPage() {
       (u) => u.loginId?.toLowerCase().includes(k) || u.userName?.toLowerCase().includes(k)
     );
   }, [users, keyword]);
+
+  const sortedUsers = useMemo(() => {
+    if (!sortKey) return filteredUsers;
+    const list = [...filteredUsers];
+    list.sort((a, b) => {
+      const av = a[sortKey] ?? '';
+      const bv = b[sortKey] ?? '';
+      const cmp = String(av).localeCompare(String(bv), 'ko');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return list;
+  }, [filteredUsers, sortKey, sortDir]);
+
+  useEffect(() => { resetVisible(); }, [keyword, resetVisible]);
+
+  const pagedUsers = useMemo(() => sortedUsers.slice(0, visibleCount), [sortedUsers, visibleCount]);
+
+  const toggleSort = (col) => {
+    if (!col.sortable) return;
+    if (sortKey === col.key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(col.key);
+      setSortDir('asc');
+    }
+  };
 
   const openCreate = () => {
     setEditingUser(null);
@@ -119,66 +162,8 @@ export default function UserPage() {
     return { total: users.length, active, inactive: users.length - active };
   }, [users]);
 
-  const columns = useMemo(
-    () => [
-      {
-        title: '사용자',
-        field: 'userName',
-        minWidth: 180,
-        formatter: (cell) => {
-          const row = cell.getRow().getData();
-          const initial = (row.userName ?? '?').slice(0, 1);
-          return `<div class="mes-identity-cell">
-              <div class="mes-avatar">${initial}</div>
-              <div class="mes-identity-text">
-                <div class="mes-identity-name">${row.userName ?? ''}</div>
-                <div class="mes-identity-sub">${row.loginId ?? ''}</div>
-              </div>
-            </div>`;
-        },
-      },
-      { title: '부서', field: 'deptName', width: 140 },
-      { title: '연락처', field: 'phone', width: 130 },
-      { title: '이메일', field: 'email', minWidth: 160 },
-      {
-        title: '상태',
-        field: 'useYn',
-        width: 90,
-        hozAlign: 'center',
-        formatter: (cell) => {
-          const on = cell.getValue() === 'Y';
-          return `<span class="mes-badge ${on ? 'mes-badge-success' : 'mes-badge-danger'}">${on ? '사용' : '중지'}</span>`;
-        },
-      },
-      {
-        title: '등록일',
-        field: 'regDt',
-        width: 150,
-        formatter: (cell) => (cell.getValue() ? String(cell.getValue()).replace('T', ' ').slice(0, 16) : ''),
-      },
-      {
-        title: '관리',
-        field: 'userId',
-        width: 120,
-        hozAlign: 'center',
-        headerSort: false,
-        formatter: () =>
-          '<div class="mes-row-actions"><button class="mes-btn mes-btn-ghost tbl-edit">수정</button><button class="mes-btn mes-btn-ghost tbl-delete">삭제</button></div>',
-        cellClick: (e, cell) => {
-          const btn = e.target.closest('button');
-          if (!btn) return;
-          const row = cell.getRow().getData();
-          if (btn.classList.contains('tbl-edit')) openEdit(row);
-          if (btn.classList.contains('tbl-delete')) handleDelete(row);
-        },
-      },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-
   return (
-    <div className="mes-page">
+    <div className="mes-page mes-page-fill">
       <div className="mes-page-header">
         <div className="mes-page-heading">
           <div className="mes-page-icon">
@@ -224,7 +209,7 @@ export default function UserPage() {
         </div>
       </div>
 
-      <div className="mes-card">
+      <div className="mes-card mes-card-fill">
         <div className="mes-toolbar">
           <div className="mes-search">
             <IconSearch size={15} />
@@ -236,7 +221,77 @@ export default function UserPage() {
           </div>
           <span className="mes-page-desc">{loading ? '불러오는 중...' : `총 ${filteredUsers.length}명`}</span>
         </div>
-        <DataTable data={filteredUsers} columns={columns} />
+
+        <div className="mes-table-scroll" onScroll={onScroll}>
+          <table className="mes-plain-table">
+            <colgroup>
+              <col style={{ width: '24%' }} />
+              <col />
+              <col style={{ width: '130px' }} />
+              <col style={{ width: '190px' }} />
+              <col style={{ width: '80px' }} />
+              <col style={{ width: '140px' }} />
+              <col style={{ width: '130px' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                {COLUMNS.map((col) => (
+                  <th
+                    key={col.key}
+                    className={col.sortable ? 'sortable' : undefined}
+                    style={col.align ? { textAlign: col.align } : undefined}
+                    onClick={() => toggleSort(col)}
+                  >
+                    {col.label}
+                    {sortKey === col.key && (
+                      <span className="sort-arrow">
+                        {sortDir === 'asc' ? <IconArrowUp size={11} /> : <IconArrowDown size={11} />}
+                      </span>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pagedUsers.length === 0 && (
+                <tr><td colSpan={COLUMNS.length} className="mes-table-empty">데이터가 없습니다.</td></tr>
+              )}
+              {pagedUsers.map((u) => (
+                <tr key={u.userId}>
+                  <td>
+                    <div className="mes-identity-cell">
+                      <div className="mes-avatar">{(u.userName ?? '?').slice(0, 1)}</div>
+                      <div className="mes-identity-text">
+                        <div className="mes-identity-name">{u.userName}</div>
+                        <div className="mes-identity-sub">{u.loginId}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{u.deptName}</td>
+                  <td>{u.phone}</td>
+                  <td className="truncate">{u.email}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <span className={`mes-badge ${u.useYn === 'Y' ? 'mes-badge-success' : 'mes-badge-danger'}`}>
+                      {u.useYn === 'Y' ? '사용' : '중지'}
+                    </span>
+                  </td>
+                  <td>{formatDt(u.regDt)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <div className="mes-row-actions" style={{ justifyContent: 'center' }}>
+                      <button className="mes-btn mes-btn-ghost" onClick={() => openEdit(u)}>수정</button>
+                      <button className="mes-btn mes-btn-ghost" onClick={() => handleDelete(u)}>삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mes-scroll-status">
+          {sortedUsers.length === 0 ? '0명' : `${Math.min(visibleCount, sortedUsers.length)} / 총 ${sortedUsers.length}명 표시 중`}
+          {visibleCount < sortedUsers.length && ' · 스크롤하여 더 보기'}
+        </div>
       </div>
 
       {modalOpen && (

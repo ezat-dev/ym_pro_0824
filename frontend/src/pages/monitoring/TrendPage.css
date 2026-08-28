@@ -1,0 +1,655 @@
+/* TREND 페이지 — 툴바/설비탭/태그패널/KPI는 앱 기본 라이트 테마 톤(--mes-* 토큰)을 그대로 쓰고,
+   레이아웃만 뷰포트 남는 여백 없이 꽉 차도록 flex로 구성한다.
+   차트(Highcharts) 자체는 sample_pro trend.jsp를 따라 다크 배경 고정 — 그 안쪽만 다크. */
+
+.trend-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* min-height로는 flex-grow가 분배할 "남는 공간"이 확정되지 않아 KPI/메모 행이 늘어나도
+   body-grid가 줄어들지 않고 페이지 전체가 그만큼 길어져 버린다 — height를 고정해야
+   body-grid(flex:1)가 실제로 줄어들며 반응한다. 900px 이하(세로 스택)에서는 반대로
+   고정 높이가 콘텐츠를 억지로 늘리므로 자연스러운 높이로 되돌린다. */
+@media (max-width: 900px) {
+  .trend-page {
+    height: auto;
+  }
+}
+
+/* ── 툴바 카드 ── */
+.trend-toolbar-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.trend-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trend-title-row {
+  justify-content: space-between;
+}
+
+.trend-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.trend-title-group svg {
+  color: var(--mes-accent-dark);
+  flex-shrink: 0;
+}
+
+.trend-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--mes-text);
+  margin: 0;
+  letter-spacing: -0.2px;
+  flex-shrink: 0;
+}
+
+.trend-title-desc {
+  font-size: 11.5px;
+  color: var(--mes-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid var(--mes-line);
+}
+
+.trend-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px;
+  border-radius: 20px;
+  border: 1px solid rgba(31, 157, 99, .5);
+  background: rgba(31, 157, 99, .08);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-success);
+  flex-shrink: 0;
+}
+
+.trend-live-badge .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mes-success);
+}
+
+.trend-toolbar-sep {
+  height: 1px;
+  background: var(--mes-line);
+  margin: 12px -16px;
+}
+
+.trend-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 26px;
+  background: var(--mes-border);
+}
+
+.trend-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #f1f2f5;
+  border: 1px solid var(--mes-border);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.trend-seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--mes-text-sub);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+
+.trend-seg-btn:hover {
+  color: var(--mes-text);
+  background: rgba(0, 0, 0, .04);
+}
+
+.trend-seg-btn.active {
+  background: var(--mes-accent-grad);
+  color: #fff;
+  box-shadow: 0 3px 10px -2px rgba(61, 90, 153, 0.5);
+}
+
+.trend-range-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mes-text-faint);
+}
+
+.trend-range-group svg {
+  color: var(--mes-text-faint);
+  flex-shrink: 0;
+}
+
+.trend-input {
+  padding: 7px 10px;
+  border: 1px solid var(--mes-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--mes-text);
+  outline: none;
+  font-size: 12.5px;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.trend-input:focus {
+  border-color: var(--mes-accent);
+  box-shadow: 0 0 0 3px var(--mes-accent-soft);
+}
+
+.trend-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--mes-border);
+  background: #fff;
+  color: var(--mes-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s, transform .05s;
+  white-space: nowrap;
+}
+
+.trend-btn:hover {
+  background: #f6f7f9;
+  border-color: #d8dbe1;
+}
+
+.trend-btn:active {
+  transform: translateY(1px);
+}
+
+.trend-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 8px;
+  border: 1px solid var(--mes-border);
+  background: #fff;
+  color: var(--mes-text-sub);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  flex-shrink: 0;
+}
+
+.trend-btn-icon:hover {
+  background: #f6f7f9;
+  color: var(--mes-text);
+}
+
+.trend-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.trend-equip-row {
+  gap: 14px;
+}
+
+.trend-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  flex-shrink: 0;
+}
+
+.trend-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.trend-tab {
+  border: 1px solid var(--mes-border);
+  background: #f1f2f5;
+  color: var(--mes-text-sub);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+
+.trend-tab:hover {
+  color: var(--mes-text);
+  background: #e7e9ee;
+}
+
+.trend-tab.active {
+  background: var(--mes-accent-soft);
+  border-color: rgba(91, 127, 199, .35);
+  color: var(--mes-accent-dark);
+}
+
+/* ── KPI 카드 ── */
+.trend-kpi-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.trend-kpi-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 10px;
+}
+
+.trend-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.trend-kpi-item {
+  background: #fafbfc;
+  border: 1px solid var(--mes-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  border-top-width: 3px;
+  border-top-style: solid;
+}
+
+.trend-kpi-name {
+  font-size: 10px;
+  color: var(--mes-text-faint);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.trend-kpi-last {
+  font-size: 17px;
+  font-weight: 800;
+  font-family: Consolas, monospace;
+  line-height: 1.2;
+}
+
+.trend-kpi-meta {
+  font-size: 9.5px;
+  color: var(--mes-text-faint);
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.trend-kpi-na {
+  font-size: 14px;
+  color: var(--mes-text-faint);
+  font-weight: 700;
+}
+
+/* ── 메모 칩 ── */
+/* ── 좌측 패널 상단 탭(표시 태그 / 메모) ── */
+.trend-panel-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  background: var(--mes-bg);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.trend-panel-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  padding: 6px 4px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.trend-panel-tab:hover {
+  color: var(--mes-text-sub);
+}
+
+.trend-panel-tab.active {
+  background: #fff;
+  color: var(--mes-text);
+  box-shadow: var(--mes-shadow-sm);
+}
+
+.trend-panel-tab.memo.active {
+  color: #805AD5;
+}
+
+.trend-panel-tab .trend-tag-count {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.trend-panel-tab .trend-tag-count.memo {
+  color: #805AD5;
+  background: rgba(128, 90, 213, .12);
+}
+
+/* ── 메모 목록 (좌측 패널 '메모' 탭) — 제목 + 내용이 한 카드 안에 세로로 쌓인다 ── */
+.trend-memo-item {
+  padding: 8px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  background: #f6f7f9;
+  transition: background .12s, border-color .12s, opacity .12s;
+}
+
+.trend-memo-item:hover {
+  background: #eceef1;
+}
+
+.trend-memo-item.visible {
+  background: rgba(128, 90, 213, .08);
+  border-left-color: #805AD5;
+}
+
+.trend-memo-item.hidden {
+  opacity: .55;
+}
+
+.trend-memo-item.hidden .trend-memo-item-title {
+  text-decoration: line-through;
+}
+
+.trend-memo-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.trend-memo-item-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mes-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.trend-memo-item-x {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--mes-text-faint);
+  opacity: .6;
+}
+
+.trend-memo-item-x:hover {
+  opacity: 1;
+  color: var(--mes-danger);
+}
+
+.trend-memo-item-desc {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--mes-text-sub);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+/* ── 본문 그리드 (남는 세로 여백 없이 뷰포트 하단까지 채움) ── */
+.trend-body-grid {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 14px;
+  flex: 1;
+  min-height: 460px;
+}
+
+@media (max-width: 900px) {
+  .trend-body-grid {
+    grid-template-columns: 1fr;
+    flex: none;
+    min-height: 0;
+  }
+}
+
+.trend-tag-panel {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.trend-tag-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--mes-accent-dark);
+  background: var(--mes-accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.trend-search-box {
+  position: relative;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.trend-search-box svg {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--mes-text-faint);
+  pointer-events: none;
+}
+
+.trend-search-box input {
+  width: 100%;
+  padding: 7px 10px 7px 28px;
+  border: 1px solid var(--mes-border);
+  border-radius: 8px;
+  background: #fafbfc;
+  color: var(--mes-text);
+  outline: none;
+  font-size: 12px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+
+.trend-search-box input:focus {
+  border-color: var(--mes-accent);
+  box-shadow: 0 0 0 3px var(--mes-accent-soft);
+  background: #fff;
+}
+
+.trend-tag-bulk {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.trend-tag-bulk button {
+  flex: 1;
+  border: 1px solid var(--mes-border);
+  background: transparent;
+  color: var(--mes-text-sub);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.trend-tag-bulk button:hover {
+  background: #f6f7f9;
+  color: var(--mes-text);
+}
+
+.trend-tag-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trend-tag-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  background: #f6f7f9;
+  transition: background .12s, border-color .12s;
+}
+
+.trend-tag-item:hover {
+  background: #eceef1;
+}
+
+.trend-tag-item.selected {
+  background: var(--mes-accent-soft);
+  border-left-color: var(--mes-accent);
+}
+
+.trend-tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trend-tag-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mes-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trend-tag-sub {
+  font-size: 10.5px;
+  color: var(--mes-text-sub);
+}
+
+.trend-tag-value {
+  flex-shrink: 0;
+  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--mes-text);
+  min-width: 34px;
+  text-align: right;
+}
+
+.trend-tag-empty {
+  padding: 20px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--mes-text-faint);
+}
+
+/* ── 차트 카드 ── */
+.trend-chart-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 10px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* 하이차트 자체는 각진 사각형 배경을 그리므로, 감싸는 컨테이너를 둥글리고 overflow:hidden으로
+   잘라낸다(하이차트가 이미 자기 컨테이너에 overflow:hidden을 걸어두므로 반경만 얹으면 된다). */
+.trend-chart-card .highcharts-container {
+  border-radius: var(--mes-radius);
+}
+
+.trend-chart-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--mes-text-faint);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.trend-chart-error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--mes-danger);
+  font-size: 13px;
+}

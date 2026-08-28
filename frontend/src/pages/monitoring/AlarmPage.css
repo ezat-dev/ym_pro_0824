@@ -1,0 +1,483 @@
+/* 경보모니터링 대시보드 — 뷰포트 높이에 스크롤 없이 맞추는 게 우선이라, 위쪽 섹션(KPI +
+   3분할 요약)은 고정(축소 불가) 높이로 촘촘하게 예산을 잡고, 맨 아래 "최근 알람 / 현재
+   발생 중인 알람" 가로 2분할 행만 flex:1로 남는 공간을 먹는다.
+   각 카드 내부는 필요하면 자체 스크롤(overflow-y)로 처리 — 카드 자체가 늘어나진 않는다. */
+
+.alarm-page-icon {
+  background: linear-gradient(135deg, #ff8a65 0%, #e0483f 60%, #b8342c 100%);
+  box-shadow: 0 8px 20px -6px rgba(224, 72, 63, 0.5);
+}
+
+.alarm-page .mes-stat-grid {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+/* ── KPI 카드에 심각도 톤의 상단 악센트 바를 얹어 조금 더 있어 보이게 ── */
+.alarm-kpi-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.alarm-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.alarm-kpi-card.accent-danger::before { background: var(--mes-danger); }
+.alarm-kpi-card.accent-accent::before { background: var(--mes-accent); }
+.alarm-kpi-card.accent-warning::before { background: var(--mes-warning); }
+.alarm-kpi-card.accent-success::before { background: var(--mes-success); }
+
+/* ── 상단 3분할(1:1:1) — 설비별 최다 메시지 + 시간별 추이 + 응답시간 추이 ── */
+.alarm-top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  height: 230px;
+}
+
+.alarm-top-row > .mes-card {
+  min-height: 0;
+  min-width: 0;
+}
+
+.alarm-chart-card {
+  padding: 10px 14px 6px;
+}
+
+.alarm-chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.alarm-chart-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--mes-text);
+  letter-spacing: -0.2px;
+}
+
+.alarm-chart-title svg {
+  color: var(--mes-accent);
+  flex-shrink: 0;
+}
+
+.alarm-chart-subtitle {
+  font-size: 10.5px;
+  color: var(--mes-text-faint);
+  margin-top: 1px;
+}
+
+.alarm-chart-stat {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.alarm-chart-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--mes-text);
+  line-height: 1.1;
+  font-family: Consolas, monospace;
+}
+
+.alarm-chart-stat-unit {
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 2px;
+  color: var(--mes-text-sub);
+}
+
+.alarm-chart-stat-label {
+  font-size: 10px;
+  color: var(--mes-text-faint);
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+@media (max-width: 1100px) {
+  .alarm-top-row {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .alarm-top-row > .mes-card {
+    height: 200px;
+  }
+}
+
+/* ── 최근 알람 + 현재 발생 중인 알람 (가로 1줄, 남는 세로 공간을 전부 차지) ── */
+.alarm-bottom-row {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.alarm-bottom-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+@media (max-width: 900px) {
+  .alarm-bottom-row {
+    flex-direction: column;
+  }
+}
+
+.alarm-recent-card {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.alarm-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.alarm-recent-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alarm-recent-seg-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #f1f2f5;
+  border: 1px solid var(--mes-border);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.alarm-recent-seg {
+  border: none;
+  background: transparent;
+  color: var(--mes-text-sub);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.alarm-recent-seg:hover {
+  color: var(--mes-text);
+  background: rgba(0, 0, 0, .04);
+}
+
+.alarm-recent-seg.active {
+  background: var(--mes-accent-grad);
+  color: #fff;
+  box-shadow: 0 2px 8px -2px rgba(61, 90, 153, 0.5);
+}
+
+.alarm-feed-compact {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+}
+
+.alarm-dash-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 10px 14px;
+}
+
+.alarm-dash-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mes-text-sub);
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+/* 2초마다 실시간으로 갱신되고 있음을 보여주는 펄스 표시 — 실제 폴링 주기(2s)에 맞춰 애니메이션한다 */
+.alarm-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  color: var(--mes-danger);
+}
+
+.alarm-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mes-danger);
+  box-shadow: 0 0 0 0 rgba(217, 72, 63, 0.55);
+  animation: alarmLivePulse 2s ease-out infinite;
+}
+
+@keyframes alarmLivePulse {
+  0% { box-shadow: 0 0 0 0 rgba(217, 72, 63, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(217, 72, 63, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(217, 72, 63, 0); }
+}
+
+.alarm-dash-card-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.alarm-dash-empty {
+  color: var(--mes-text-faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+  margin: auto;
+}
+
+/* 설비별 최다 발생 메시지 */
+.alarm-msg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--mes-line);
+  flex-shrink: 0;
+}
+
+.alarm-msg-row:last-child {
+  border-bottom: none;
+}
+
+.alarm-msg-rank {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--mes-accent-soft);
+  color: var(--mes-accent-dark);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.alarm-msg-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.alarm-msg-plc {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-text);
+}
+
+.alarm-msg-text {
+  font-size: 10.5px;
+  color: var(--mes-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alarm-msg-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-danger);
+  flex-shrink: 0;
+}
+
+/* 현재 발생 중인 알람 */
+.alarm-live-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-left: 3px solid;
+  background: var(--mes-bg);
+  border-radius: 6px;
+  flex-shrink: 0;
+  max-height: 80px;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity .4s ease, transform .4s ease, max-height .4s ease,
+    padding .4s ease, border-width .4s ease;
+}
+
+/* 해제되어 최근 알람 쪽으로 "이동"하는 순간의 퇴장 애니메이션 — 왼쪽으로 밀려나며 접힌다 */
+.alarm-live-row-exiting {
+  opacity: 0;
+  transform: translateX(-36px);
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-left-width: 0;
+}
+
+/* 새로 발생한 알람이 막 도착하는 입장 애니메이션 */
+.alarm-live-row-entering {
+  animation: alarmLiveArrive .5s ease;
+}
+
+@keyframes alarmLiveArrive {
+  0% { opacity: 0; transform: translateX(18px) scale(.97); background: var(--mes-danger-soft); }
+  100% { opacity: 1; transform: translateX(0) scale(1); background: var(--mes-bg); }
+}
+
+.alarm-live-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.alarm-live-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--mes-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alarm-live-detail {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mes-text-sub);
+}
+
+.alarm-live-time {
+  font-size: 11.5px;
+  color: var(--mes-text-faint);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 최근 알람 — 발생시각/설비/메시지만 보여주는 간소화된 카드 피드 (현재 발생 중인 알람과
+   글씨 크기·행 높이를 동일하게 맞춘다) */
+.alarm-feed-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-left: 3px solid;
+  background: var(--mes-bg);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* 현재 발생 중인 알람에서 막 "이동"해 온 항목 — 오른쪽에서 슬라이드해 들어오며 초록으로 잠깐 강조 */
+.alarm-feed-card-fresh {
+  animation: alarmFeedArrive 1.4s ease;
+}
+
+@keyframes alarmFeedArrive {
+  0% { opacity: 0; transform: translateX(26px); background: rgba(31, 157, 99, 0.22); }
+  55% { opacity: 1; transform: translateX(0); background: rgba(31, 157, 99, 0.22); }
+  100% { opacity: 1; transform: translateX(0); background: var(--mes-bg); }
+}
+
+.alarm-feed-time {
+  font-size: 11.5px;
+  color: var(--mes-text-sub);
+  font-family: Consolas, monospace;
+  flex-shrink: 0;
+  width: 215px;
+}
+
+.alarm-feed-folder {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--mes-text);
+  flex-shrink: 0;
+  width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alarm-feed-msg {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--mes-text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 아직 해제되지 않은 알람 — 행 전체에 연초록 그라데이션이 천천히 오가며 은은하게 살아있는 느낌을 준다 */
+.alarm-feed-card-active {
+  background: linear-gradient(120deg, #eafaf1 0%, #d3f5df 45%, #eafaf1 100%);
+  background-size: 220% 100%;
+  animation: alarmRowActiveShimmer 3s ease-in-out infinite;
+}
+
+@keyframes alarmRowActiveShimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 활성 표시 — 초록 점 하나로 단순화. 행의 그라데이션과 같은 3s 주기라 서로 맞물려 옅어졌다 짙어진다 */
+.alarm-feed-active-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #1f9d63;
+  animation: alarmActiveDotPulse 3s ease-in-out infinite;
+}
+
+@keyframes alarmActiveDotPulse {
+  0%, 100% { background-color: #a8ecc4; box-shadow: 0 0 0 0 rgba(31, 157, 99, 0); }
+  50% { background-color: #1f9d63; box-shadow: 0 0 5px 1px rgba(31, 157, 99, .45); }
+}
+
+@media (max-width: 640px) {
+  .alarm-feed-card {
+    flex-wrap: wrap;
+  }
+
+  .alarm-feed-time {
+    width: auto;
+  }
+}

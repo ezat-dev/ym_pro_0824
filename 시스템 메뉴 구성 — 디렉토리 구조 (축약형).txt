@@ -1,0 +1,550 @@
+시스템 메뉴 구성 — 디렉토리 구조 (축약형)
+기준정보 → /base/
+메뉴	파일 경로
+사용자관리	/base/user.jsp
+거래처관리	/base/vendor.jsp
+제품관리	/base/product.jsp
+패턴관리	/base/pattern.jsp
+사용자권한	/base/auth.jsp
+로그인이력	/base/loginHist.jsp
+
+모니터링 → /monitoring/
+메뉴	파일 경로
+종합생산현황	/monitoring/prodStatus.jsp
+통합모니터링	/monitoring/integrated.jsp
+경보모니터링	/monitoring/alarm.jsp
+경보랭킹	/monitoring/alarmRank.jsp
+TREND	/monitoring/trend.jsp
+LOT 현황	/monitoring/lotStatus.jsp
+LOT 트래킹	/monitoring/lotTracking.jsp
+
+생산관리 → /production/
+메뉴	파일 경로
+작업지시관리	/production/workOrder.jsp
+제품별작업관리	/production/byItem.jsp
+설비효율현황	/production/equipEff.jsp
+작업일보	/production/dailyReport.jsp
+LOT 보고서	/production/lotReport.jsp
+
+조건관리 → /condition/
+메뉴	파일 경로
+열전대/센서 관리	/condition/sensor.jsp
+조절계 관리	/condition/controller.jsp
+열처리유성상분석	/condition/oilAnalysis.jsp
+일상점검일지	/condition/dailyCheck.jsp
+관리계획서 및 작업표준서	/condition/standard.jsp
+
+품질관리 → /quality/
+메뉴	파일 경로
+CPK 분석	/quality/cpk.jsp
+PPK 분석	/quality/ppk.jsp
+F/PROOF	/quality/fproof.jsp
+온도균일성보고서	/quality/tempUniform.jsp
+경도관리	/quality/hardness.jsp
+부적합품관리	/quality/nonconform.jsp
+
+설비관리 → /equipment/
+메뉴	파일 경로
+설비비가동현황	/equipment/downStatus.jsp
+설비가동률분석	/equipment/utilRate.jsp
+전력량	/equipment/powerUsage.jsp
+설비이력관리	/equipment/history.jsp
+수리이력관리	/equipment/repairHist.jsp
+SPARE 부품관리	/equipment/sparePart.jsp
+
+
+
+
+
+
+
+
+
+
+
+
+
+# MES 시스템 프로젝트 생성 프롬프트
+
+아래 내용대로 프로젝트를 구성해줘.
+
+## 1. 프로젝트 개요
+
+- 목적: MES(Manufacturing Execution System) 관리자용 웹 화면
+- 범위(1단계): **로그인/권한 없이**, 사이드바 메뉴 클릭 → 페이지 이동까지만 동작하는 골격을 만든다. 사내 폐쇄망 운영이라 인증은 후순위로 미룬다.
+- 백엔드: Java 21, Spring Boot, Gradle, MyBatis
+- 프론트엔드: React (Vite), React Router
+- DB: MySQL (MyBatis 사용이므로 실제 DB 연결 없이도 구조는 완성)
+
+## 2. 백엔드 요구사항
+
+### 2.1 레이어 구조 (메뉴 1개당 아래 6개 파일 생성)
+
+```
+Controller → Service(interface) → ServiceImpl → DAO(Mapper interface) → Mapper.xml → Domain(VO/DTO)
+```
+
+- Controller: HTTP 요청/응답만 처리, 비즈니스 로직 없음
+- Service: 인터페이스로 계약만 정의
+- ServiceImpl: 실제 로직 위치, `@Transactional` 여기서 관리
+- DAO: `@Mapper` 붙은 인터페이스
+- Mapper.xml: 실제 SQL, `src/main/resources/mapper/{중분류}/{메뉴}Mapper.xml`
+- Domain: VO(DB 컬럼 1:1), 검색조건 DTO, 등록/수정 요청 DTO 분리
+
+### 2.2 패키지 구조 — 중분류(대분류 카테고리) 기준 폴더링
+
+```
+com.mes
+ ├─ MesApplication.java
+ ├─ common
+ │   ├─ response      (ApiResponse, PageResponse)
+ │   ├─ exception     (GlobalExceptionHandler, BusinessException, ErrorCode)
+ │   └─ config        (MyBatisConfig, CorsConfig)
+ ├─ menu              (사이드바 메뉴 트리 반환 전용, 횡단 관심사)
+ │   ├─ controller / service / service.impl / dao / domain
+ ├─ base              (기준정보)
+ │   ├─ controller / service / service.impl / dao / domain
+ ├─ monitoring        (모니터링)
+ ├─ production        (생산관리)
+ ├─ condition         (조건관리)
+ ├─ quality           (품질관리)
+ └─ equipment         (설비관리)
+```
+
+각 중분류 패키지 하위에 소속 메뉴 개수만큼 Controller/Service/ServiceImpl/DAO/Domain 세트를 만든다 (아래 4번 메뉴 목록 참고).
+
+### 2.3 REST API 규칙
+
+- URL 패턴: `/api/{중분류}/{메뉴}`  예) `/api/base/user`, `/api/quality/cpk`
+- 표준 응답 포맷:
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "message": null,
+  "data": { }
+}
+```
+
+- 1단계 범위에서는 각 메뉴 Controller는 **목록 조회 API 1개만** 우선 구현 (`GET /api/{중분류}/{메뉴}` → 더미/빈 데이터라도 정상 응답 형태로 반환). CRUD 나머지는 다음 단계.
+
+### 2.4 메뉴 트리 API (사이드바용, 가장 먼저 만들 것)
+
+```
+GET /api/menu/tree
+```
+
+응답 예시:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "category": "기준정보",
+      "path": "/base",
+      "menus": [
+        { "name": "사용자관리", "path": "/base/user" },
+        { "name": "거래처관리", "path": "/base/vendor" }
+      ]
+    }
+  ]
+}
+```
+
+1단계에서는 DB 조회 대신 서버 코드 내 고정 리스트(하드코딩)로 반환해도 된다. 나중에 `tb_menu` 테이블 연동으로 교체할 수 있게 Service 계층은 분리해둘 것.
+
+## 3. 프론트엔드 요구사항
+
+### 3.1 폴더 구조 (백엔드와 미러링)
+
+```
+src
+ ├─ main.jsx
+ ├─ App.jsx                 (Router 정의)
+ ├─ layouts/MainLayout.jsx  (Sidebar + Header + <Outlet/>)
+ ├─ components/Sidebar.jsx  (아래 3.3 디자인 사양 참고)
+ ├─ api
+ │   ├─ axiosInstance.js
+ │   ├─ menuApi.js
+ │   ├─ base/, monitoring/, production/, condition/, quality/, equipment/
+ ├─ pages
+ │   ├─ base/, monitoring/, production/, condition/, quality/, equipment/
+ │       (각 폴더 안에 소속 메뉴 개수만큼 컴포넌트, 1단계에서는 "메뉴명 + 준비중" 정도의 placeholder 내용만)
+ └─ router/routes.js
+```
+
+### 3.2 라우팅
+
+- 백엔드 메뉴 API의 `path` 값을 React Router 경로로 그대로 사용
+- 사이드바 클릭 → `navigate(path)` → 해당 페이지 렌더링까지가 1단계 완료 기준
+- 예: `/base/user` 클릭 → `pages/base/UserManagement.jsx` 렌더링
+
+### 3.3 사이드바 디자인 사양
+
+- 좌측 고정 사이드바, 다크 톤(#15171c 배경)
+- 상단 토글 버튼 클릭 시 사이드바 접기/펼치기 (아이콘만 남는 형태로 축소)
+- 대분류(카테고리)는 아코디언으로 펼침/숨김
+- 메뉴 클릭 시 활성 상태 하이라이트(좌측 accent 바 + 배경색)
+- 스크롤바는 시각적으로 숨기되 휠 스크롤은 동작
+
+## 4. 메뉴 전체 목록 (총 35개)
+
+### 기준정보 → `/base`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| 사용자관리 | /base/user |
+| 거래처관리 | /base/vendor |
+| 제품관리 | /base/product |
+| 패턴관리 | /base/pattern |
+| 사용자권한 | /base/auth |
+| 로그인이력 | /base/loginHist |
+
+### 모니터링 → `/monitoring`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| 종합생산현황 | /monitoring/prodStatus |
+| 통합모니터링 | /monitoring/integrated |
+| 경보모니터링 | /monitoring/alarm |
+| 경보랭킹 | /monitoring/alarmRank |
+| TREND | /monitoring/trend |
+| LOT 현황 | /monitoring/lotStatus |
+| LOT 트래킹 | /monitoring/lotTracking |
+
+### 생산관리 → `/production`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| 작업지시관리 | /production/workOrder |
+| 제품별작업관리 | /production/byItem |
+| 설비효율현황 | /production/equipEff |
+| 작업일보 | /production/dailyReport |
+| LOT 보고서 | /production/lotReport |
+
+### 조건관리 → `/condition`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| 열전대/센서 관리 | /condition/sensor |
+| 조절계 관리 | /condition/controller |
+| 열처리유성상분석 | /condition/oilAnalysis |
+| 일상점검일지 | /condition/dailyCheck |
+| 관리계획서 및 작업표준서 | /condition/standard |
+
+### 품질관리 → `/quality`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| CPK 분석 | /quality/cpk |
+| PPK 분석 | /quality/ppk |
+| F/PROOF | /quality/fproof |
+| 온도균일성보고서 | /quality/tempUniform |
+| 경도관리 | /quality/hardness |
+| 부적합품관리 | /quality/nonconform |
+
+### 설비관리 → `/equipment`
+| 메뉴 | API/라우트 경로 |
+|---|---|
+| 설비비가동현황 | /equipment/downStatus |
+| 설비가동률분석 | /equipment/utilRate |
+| 전력량 | /equipment/powerUsage |
+| 설비이력관리 | /equipment/history |
+| 수리이력관리 | /equipment/repairHist |
+| SPARE 부품관리 | /equipment/sparePart |
+
+## 5. 1단계 완료 기준 (Definition of Done)
+
+- [ ] Spring Boot 서버 정상 기동, `/api/menu/tree` 호출 시 위 35개 메뉴 트리 JSON 정상 응답
+- [ ] React 앱 실행 시 사이드바에 6개 대분류 + 35개 메뉴 정상 렌더링
+- [ ] 사이드바 메뉴 클릭 시 해당 라우트로 이동 + placeholder 페이지 정상 표시
+- [ ] 사이드바 접기/펼치기 토글 정상 동작
+- [ ] 인증/권한, 실제 CRUD 로직, DB 연동은 이번 단계 범위 아님 (다음 단계에서 진행)
+
+
+
+메뉴바 사용
+// src/components/Sidebar.jsx
+import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  IconHexagon, IconChevronLeft, IconChevronRight, IconChevronDown,
+  IconDatabase, IconActivity, IconClipboardList, IconAdjustments,
+  IconCertificate, IconSettings
+} from '@tabler/icons-react';
+
+// 대분류별 아이콘 매핑
+const CATEGORY_ICONS = {
+  '기준정보': IconDatabase,
+  '모니터링': IconActivity,
+  '생산관리': IconClipboardList,
+  '조건관리': IconAdjustments,
+  '품질관리': IconCertificate,
+  '설비관리': IconSettings,
+};
+
+const ACCENT = '#5b7fc7';
+
+// 1단계: 하드코딩 데이터. 이후 menuApi.getMenuTree()로 교체
+const MENU_DATA = [
+  { category: '기준정보', path: '/base', menus: [
+    { name: '사용자관리', path: '/base/user' },
+    { name: '거래처관리', path: '/base/vendor' },
+    { name: '제품관리', path: '/base/product' },
+    { name: '패턴관리', path: '/base/pattern' },
+    { name: '사용자권한', path: '/base/auth' },
+    { name: '로그인이력', path: '/base/loginHist' },
+  ]},
+  { category: '모니터링', path: '/monitoring', menus: [
+    { name: '종합생산현황', path: '/monitoring/prodStatus' },
+    { name: '통합모니터링', path: '/monitoring/integrated' },
+    { name: '경보모니터링', path: '/monitoring/alarm' },
+    { name: '경보랭킹', path: '/monitoring/alarmRank' },
+    { name: 'TREND', path: '/monitoring/trend' },
+    { name: 'LOT 현황', path: '/monitoring/lotStatus' },
+    { name: 'LOT 트래킹', path: '/monitoring/lotTracking' },
+  ]},
+  { category: '생산관리', path: '/production', menus: [
+    { name: '작업지시관리', path: '/production/workOrder' },
+    { name: '제품별작업관리', path: '/production/byItem' },
+    { name: '설비효율현황', path: '/production/equipEff' },
+    { name: '작업일보', path: '/production/dailyReport' },
+    { name: 'LOT 보고서', path: '/production/lotReport' },
+  ]},
+  { category: '조건관리', path: '/condition', menus: [
+    { name: '열전대/센서 관리', path: '/condition/sensor' },
+    { name: '조절계 관리', path: '/condition/controller' },
+    { name: '열처리유성상분석', path: '/condition/oilAnalysis' },
+    { name: '일상점검일지', path: '/condition/dailyCheck' },
+    { name: '관리계획서 및 작업표준서', path: '/condition/standard' },
+  ]},
+  { category: '품질관리', path: '/quality', menus: [
+    { name: 'CPK 분석', path: '/quality/cpk' },
+    { name: 'PPK 분석', path: '/quality/ppk' },
+    { name: 'F/PROOF', path: '/quality/fproof' },
+    { name: '온도균일성보고서', path: '/quality/tempUniform' },
+    { name: '경도관리', path: '/quality/hardness' },
+    { name: '부적합품관리', path: '/quality/nonconform' },
+  ]},
+  { category: '설비관리', path: '/equipment', menus: [
+    { name: '설비비가동현황', path: '/equipment/downStatus' },
+    { name: '설비가동률분석', path: '/equipment/utilRate' },
+    { name: '전력량', path: '/equipment/powerUsage' },
+    { name: '설비이력관리', path: '/equipment/history' },
+    { name: '수리이력관리', path: '/equipment/repairHist' },
+    { name: 'SPARE 부품관리', path: '/equipment/sparePart' },
+  ]},
+];
+
+export default function Sidebar({ menuData = MENU_DATA, userName = '김민수', userDept = '생산관리팀' }) {
+  const [collapsed, setCollapsed] = useState(false);
+  // 첫 번째 그룹만 기본 펼침
+  const [openGroups, setOpenGroups] = useState(() => new Set([menuData[0]?.category]));
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const toggleGroup = (category) => {
+    setOpenGroups(prev => {
+      const next = new Set(prev);
+      next.has(category) ? next.delete(category) : next.add(category);
+      return next;
+    });
+  };
+
+  const userInitial = userName ? userName.slice(0, 1) : '';
+
+  return (
+    <div
+      style={{
+        width: collapsed ? 60 : 236,
+        flexShrink: 0,
+        background: '#15171c',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'width .2s cubic-bezier(.4,0,.2,1)',
+        height: '100%',
+      }}
+    >
+      {/* 로고 + 토글 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 16px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+            background: 'linear-gradient(135deg,#3d5a99,#2c3e5f)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <IconHexagon size={15} color="#cdd8ee" />
+          </div>
+          {!collapsed && (
+            <span style={{ fontSize: 14, fontWeight: 500, color: '#f2f3f5', whiteSpace: 'nowrap', letterSpacing: .2 }}>
+              SMART MES
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          aria-label={collapsed ? '메뉴 펼치기' : '메뉴 접기'}
+          style={{
+            border: 'none', background: 'transparent', borderRadius: 6,
+            width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0, color: '#6b7280', flexShrink: 0,
+          }}
+        >
+          {collapsed ? <IconChevronRight size={15} /> : <IconChevronLeft size={15} />}
+        </button>
+      </div>
+
+      <div style={{ height: 1, margin: '0 16px 8px', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent)' }} />
+
+      {/* 메뉴 영역 (스크롤바 숨김) */}
+      <div
+        className="mes-sidebar-scroll"
+        style={{ flex: 1, overflowY: 'auto', padding: '6px 10px 10px' }}
+      >
+        {menuData.map(group => {
+          const Icon = CATEGORY_ICONS[group.category] ?? IconDatabase;
+          const isOpen = openGroups.has(group.category);
+          return (
+            <div key={group.category} style={{ marginBottom: 2 }}>
+              <button
+                onClick={() => toggleGroup(group.category)}
+                aria-expanded={isOpen}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '9px 8px', background: 'transparent', border: 'none',
+                  borderRadius: 7, cursor: 'pointer', color: '#d1d5db',
+                  fontSize: 12.5, fontWeight: 500, textAlign: 'left', letterSpacing: .1,
+                  transition: 'background .12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.04)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <Icon size={16} style={{ flexShrink: 0, color: '#8b90a0' }} />
+                {!collapsed && <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{group.category}</span>}
+                {!collapsed && (
+                  <IconChevronDown
+                    size={12}
+                    style={{ color: '#5b6070', transition: 'transform .18s', transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+                  />
+                )}
+              </button>
+
+              {!collapsed && isOpen && (
+                <div style={{ paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {group.menus.map(item => {
+                    const active = location.pathname === item.path;
+                    return (
+                      <button
+                        key={item.path}
+                        onClick={() => navigate(item.path)}
+                        style={{
+                          width: '100%', textAlign: 'left', padding: '7px 10px',
+                          fontSize: 12.5, background: active ? `${ACCENT}22` : 'transparent',
+                          color: active ? '#c3d0f0' : '#9199a8',
+                          fontWeight: active ? 500 : 400,
+                          border: 'none', borderLeft: `2px solid ${active ? ACCENT : 'transparent'}`,
+                          borderRadius: '0 6px 6px 0', cursor: 'pointer',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          transition: 'background .12s, color .12s',
+                        }}
+                        onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'rgba(255,255,255,.035)'; e.currentTarget.style.color = '#d1d5db'; } }}
+                        onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9199a8'; } }}
+                      >
+                        {item.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 하단 사용자 정보 */}
+      <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,.06)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: '50%', background: '#2a2d35', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 500, color: '#9ca3af',
+        }}>
+          {userInitial}
+        </div>
+        {!collapsed && (
+          <div style={{ overflow: 'hidden' }}>
+            <div style={{ fontSize: 12, color: '#e5e7eb', whiteSpace: 'nowrap' }}>{userName}</div>
+            <div style={{ fontSize: 11, color: '#6b7280', whiteSpace: 'nowrap' }}>{userDept}</div>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        .mes-sidebar-scroll::-webkit-scrollbar { display: none; }
+        .mes-sidebar-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+      `}</style>
+    </div>
+  );
+}
+
+
+
+// src/layouts/MainLayout.jsx
+import { Outlet } from 'react-router-dom';
+import Sidebar from '../components/Sidebar';
+
+export default function MainLayout() {
+  return (
+    <div style={{ display: 'flex', height: '100vh' }}>
+      <Sidebar />
+      <div style={{ flex: 1, overflow: 'auto', background: '#f5f6f8' }}>
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
+
+서비스	포트	상태	DB 연동 확인
+백엔드	9090	✅	✅ (db_ym_pro 사용자 목록 조회 정상)
+프론트엔드	5051	✅	-
+PlcApiServer	5050	✅	✅ (ez_scada PLC 목록 조회 정상)
+
+
+
+http://localhost:5050/api/plc/writeBit/MST_MITSUBISHI?address=70&value=1&device=M
+
+프런트 실행방법
+D:\YM_프로젝트 관련\ym_pro\run-frontend.bat 더블클릭 — 이거 하나면 끝입니다.
+
+명령어로 직접 하고 싶으면
+cmd 창에서:
+
+
+cd /d "D:\YM_프로젝트 관련\ym_pro\frontend"
+npm run dev
+PowerShell 창에서:
+
+
+cd "D:\YM_프로젝트 관련\ym_pro\frontend"
+npm.cmd run dev
+
+
+백엔드 실행 방법
+cmd 창에서:
+
+
+cd /d "D:\YM_프로젝트 관련\ym_pro\backend"
+set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot
+set PATH=%JAVA_HOME%\bin;%PATH%
+set DB_USERNAME=root
+set DB_PASSWORD=1234
+set EZSCADA_DB_USERNAME=root
+set EZSCADA_DB_PASSWORD=1234
+gradlew.bat bootRun
+PowerShell 창에서:
+
+
+cd "D:\YM_프로젝트 관련\ym_pro\backend"
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot"
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:DB_USERNAME = "root"
+$env:DB_PASSWORD = "1234"
+$env:EZSCADA_DB_USERNAME = "root"
+$env:EZSCADA_DB_PASSWORD = "1234"
+.\gradlew.bat bootRun
