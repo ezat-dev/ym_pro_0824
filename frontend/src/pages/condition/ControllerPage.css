@@ -1,0 +1,286 @@
+/* 조건관리 > 조절계 관리 — 온도조절계 정도검사(교정) 이력 */
+
+.ctrl-page-icon {
+  background: linear-gradient(135deg, #4ecdc4 0%, #1f8a82 100%);
+  box-shadow: 0 6px 16px -4px rgba(31, 138, 130, 0.45);
+}
+
+/* ── 상단 헤더 카드 ── */
+
+.ctrl-header-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 20px 22px;
+  margin-bottom: 20px;
+}
+
+.ctrl-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ctrl-header-sep {
+  height: 1px;
+  background: var(--mes-line);
+  margin: 18px 0 16px;
+}
+
+.ctrl-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ctrl-header-spacer {
+  flex: 1;
+}
+
+.ctrl-doc-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-accent-dark);
+  background: var(--mes-accent-soft);
+  padding: 4px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ── 그리드 셀 렌더링 (배지 남발 대신 절제된 타이포로) ── */
+
+.ctrl-empty {
+  color: var(--mes-text-faint);
+}
+
+.ctrl-equip-name {
+  font-weight: 700;
+  color: var(--mes-text);
+  letter-spacing: -0.1px;
+}
+
+.ctrl-zone-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--mes-text-sub);
+}
+
+.ctrl-zone-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mes-accent);
+  flex-shrink: 0;
+}
+
+.ctrl-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--mes-text-sub);
+}
+
+.ctrl-deviation {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--mes-text);
+  letter-spacing: -0.2px;
+}
+
+.ctrl-file-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--mes-accent-dark);
+  cursor: pointer;
+}
+
+.ctrl-file-count:hover {
+  text-decoration: underline;
+}
+
+.ctrl-meta-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--mes-text-faint);
+  font-size: 12.5px;
+}
+
+/* ── 표 영역: 헤더 카드 아래 남는 공간을 전부 채우고, 페이지네이션 대신 내부 스크롤 ── */
+
+.ctrl-table-card {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ctrl-table-wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 등록/수정 모달: 드래그앤드롭 첨부 ── */
+
+.ctrl-dropzone-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .ctrl-dropzone-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ctrl-dropzone-wrap label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mes-text-sub);
+  margin-bottom: 6px;
+}
+
+.ctrl-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1.5px dashed var(--mes-border);
+  border-radius: var(--mes-radius);
+  background: #fafbfc;
+  color: var(--mes-text-faint);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+
+.ctrl-dropzone:hover,
+.ctrl-dropzone.drag-over {
+  border-color: var(--mes-accent);
+  background: var(--mes-accent-soft);
+  color: var(--mes-accent-dark);
+}
+
+.ctrl-file-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.ctrl-file-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--mes-line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.ctrl-file-list li.ctrl-file-new {
+  background: var(--mes-accent-soft);
+  border-color: rgba(91, 127, 199, 0.3);
+}
+
+.ctrl-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mes-text);
+}
+
+.ctrl-file-size {
+  flex-shrink: 0;
+  color: var(--mes-text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.ctrl-file-list li button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--mes-text-faint);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ctrl-file-list li button:hover {
+  background: var(--mes-danger-soft);
+  color: var(--mes-danger);
+}
+
+.ctrl-file-empty {
+  padding: 10px 0 !important;
+  justify-content: center;
+  color: var(--mes-text-faint);
+  border: none !important;
+  background: transparent !important;
+}
+
+/* ── 파일 목록(반기별) 미니 모달 ── */
+
+.ctrl-filelist-modal {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ctrl-filelist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--mes-line);
+  border-radius: var(--mes-radius-sm);
+}
+
+.ctrl-filelist-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mes-text);
+}
+
+.ctrl-filelist-size {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--mes-text-faint);
+  font-variant-numeric: tabular-nums;
+}

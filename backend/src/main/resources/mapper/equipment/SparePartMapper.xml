@@ -2,28 +2,132 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="SparePartMapper">
 
-    <!-- 설비관리 > SPARE 부품관리 (equipment_spare_part) -->
+    <!-- 설비관리 > SPARE 부품관리 (equipment_spare_part / equipment_spare_part_history) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.equipment.SparePart">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM equipment_spare_part
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+    <resultMap id="sparePartMap" type="com.mes.domain.equipment.SparePart">
+        <id property="id" column="id" />
+        <result property="partName" column="part_name" />
+        <result property="equipName" column="equip_name" />
+        <result property="standard" column="standard" />
+        <result property="maker" column="maker" />
+        <result property="unit" column="unit" />
+        <result property="safeStock" column="safe_stock" />
+        <result property="replaceType" column="replace_type" />
+        <result property="buyCycle" column="buy_cycle" />
+        <result property="storageLocation" column="storage_location" />
+        <result property="rackNo" column="rack_no" />
+        <result property="remark" column="remark" />
+        <result property="regUserName" column="reg_user_name" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+        <result property="currentStock" column="current_stock" />
+        <result property="stockStatus" column="stock_status" />
+    </resultMap>
+
+    <resultMap id="sparePartHistoryMap" type="com.mes.domain.equipment.SparePartHistory">
+        <id property="id" column="id" />
+        <result property="sparePartId" column="spare_part_id" />
+        <result property="type" column="type" />
+        <result property="qty" column="qty" />
+        <result property="workDesc" column="work_desc" />
+        <result property="regUserName" column="reg_user_name" />
+        <result property="regDt" column="reg_dt" />
+        <result property="partName" column="part_name" />
+    </resultMap>
+
+    <sql id="stockSubquery">
+        (SELECT IFNULL(SUM(CASE WHEN h.type = 'IN' THEN h.qty ELSE -h.qty END), 0)
+         FROM equipment_spare_part_history h WHERE h.spare_part_id = p.id)
+    </sql>
+
+    <select id="selectList" parameterType="map" resultMap="sparePartMap">
+        SELECT p.*,
+            <include refid="stockSubquery" /> AS current_stock,
+            CASE
+                WHEN <include refid="stockSubquery" /> &lt;= 0 THEN '재고없음'
+                WHEN <include refid="stockSubquery" /> &lt; p.safe_stock THEN '부족'
+                ELSE '정상'
+            END AS stock_status
+        FROM equipment_spare_part p
+        WHERE p.use_yn = 'Y'
+        <if test="equipName != null and equipName != ''">
+            AND p.equip_name = #{equipName}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND p.part_name LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        ORDER BY p.equip_name ASC, p.part_name ASC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM equipment_spare_part
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+    <select id="selectEquipNames" resultType="string">
+        SELECT DISTINCT equip_name FROM equipment_spare_part WHERE use_yn = 'Y' AND equip_name != '' ORDER BY equip_name
     </select>
+
+    <select id="selectById" parameterType="long" resultMap="sparePartMap">
+        SELECT p.*,
+            <include refid="stockSubquery" /> AS current_stock,
+            CASE
+                WHEN <include refid="stockSubquery" /> &lt;= 0 THEN '재고없음'
+                WHEN <include refid="stockSubquery" /> &lt; p.safe_stock THEN '부족'
+                ELSE '정상'
+            END AS stock_status
+        FROM equipment_spare_part p
+        WHERE p.id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.mes.domain.equipment.SparePart" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO equipment_spare_part
+            (part_name, equip_name, standard, maker, unit, safe_stock, replace_type, buy_cycle,
+             storage_location, rack_no, remark, reg_user_name)
+        VALUES
+            (#{partName}, #{equipName}, #{standard}, #{maker}, #{unit}, #{safeStock}, #{replaceType}, #{buyCycle},
+             #{storageLocation}, #{rackNo}, #{remark}, #{regUserName})
+    </insert>
+
+    <update id="update" parameterType="com.mes.domain.equipment.SparePart">
+        UPDATE equipment_spare_part
+        SET part_name = #{partName},
+            equip_name = #{equipName},
+            standard = #{standard},
+            maker = #{maker},
+            unit = #{unit},
+            safe_stock = #{safeStock},
+            replace_type = #{replaceType},
+            buy_cycle = #{buyCycle},
+            storage_location = #{storageLocation},
+            rack_no = #{rackNo},
+            remark = #{remark},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE equipment_spare_part SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
+
+    <!-- ── 입출고 이력 ── -->
+
+    <select id="selectHistoryList" parameterType="map" resultMap="sparePartHistoryMap">
+        SELECT h.*, p.part_name
+        FROM equipment_spare_part_history h
+        JOIN equipment_spare_part p ON p.id = h.spare_part_id
+        <where>
+            <if test="partId != null">AND h.spare_part_id = #{partId}</if>
+            <if test="type != null and type != ''">AND h.type = #{type}</if>
+            <if test="from != null and from != ''">AND h.reg_dt &gt;= CONCAT(#{from}, ' 00:00:00')</if>
+            <if test="to != null and to != ''">AND h.reg_dt &lt;= CONCAT(#{to}, ' 23:59:59')</if>
+        </where>
+        ORDER BY h.reg_dt DESC, h.id DESC
+    </select>
+
+    <insert id="insertHistory" parameterType="com.mes.domain.equipment.SparePartHistory" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO equipment_spare_part_history (spare_part_id, type, qty, work_desc, reg_user_name)
+        VALUES (#{sparePartId}, #{type}, #{qty}, #{workDesc}, #{regUserName})
+    </insert>
+
+    <delete id="deleteHistory" parameterType="long">
+        DELETE FROM equipment_spare_part_history WHERE id = #{id}
+    </delete>
 
 </mapper>

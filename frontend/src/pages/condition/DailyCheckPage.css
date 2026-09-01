@@ -1,0 +1,138 @@
+.dc-upload-btn {
+  border: 1px solid var(--mes-border);
+  background: #fafbfc;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--mes-text-sub);
+}
+
+.dc-upload-btn:hover {
+  border-color: var(--mes-accent);
+  color: var(--mes-accent-dark);
+}
+
+.dc-file-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--mes-border);
+  border-radius: 6px;
+  background: #fafbfc;
+  color: var(--mes-accent);
+  cursor: pointer;
+}
+
+.dc-file-link:hover {
+  border-color: var(--mes-accent);
+  background: var(--mes-accent-soft);
+  color: var(--mes-accent-dark);
+}
+
+.dc-viewer-iframe {
+  width: 100%;
+  height: 70vh;
+  border: none;
+}
+
+.dc-type-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--mes-accent-soft);
+  color: var(--mes-accent-dark);
+}
+
+.dc-value-badge {
+  display: inline-block;
+  min-width: 28px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--mes-border);
+  color: var(--mes-text-sub);
+}
+
+.dc-badge-ok {
+  background: var(--mes-success-soft);
+  color: var(--mes-success);
+}
+
+.dc-badge-ng {
+  background: var(--mes-danger-soft);
+  color: var(--mes-danger);
+}
+
+.dc-cell-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 0 6px;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* 카드가 남은 세로 공간을 전부 차지하고, 그 안에서 그리드가 최대한 커지도록 한다
+   (DailyCheckPage 전용 클래스로 감싸서 다른 페이지의 DataTable에는 영향 없게 함). */
+.dc-grid-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dc-grid-wrap .mes-table-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dc-grid-wrap .mes-table-wrap > div {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 태블릿 모드 — 현장에서 터치로 보기 쉽게 글자/셀을 키운다 */
+.dc-tablet-mode .mes-table-wrap {
+  font-size: 15px;
+}
+
+.dc-tablet-mode .dc-value-badge {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+.dc-tablet-mode .dc-type-badge {
+  font-size: 10px;
+  padding: 3px 7px;
+}
+
+.dc-tablet-mode .dc-cell-input {
+  font-size: 14px;
+}
+
+.dc-grid-wrap .tabulator-cell.dc-today-col {
+  background: var(--mes-accent-soft);
+}
+
+.dc-grid-wrap .tabulator-col.dc-today-col .tabulator-col-title {
+  color: var(--mes-accent-dark);
+}
+
+.dc-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--mes-text-sub);
+  white-space: nowrap;
+}

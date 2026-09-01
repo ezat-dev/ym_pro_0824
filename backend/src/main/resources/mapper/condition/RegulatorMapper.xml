@@ -2,28 +2,92 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="RegulatorMapper">
 
-    <!-- 조건관리 > 조절계 관리 (condition_controller) -->
+    <!-- 조건관리 > 조절계 관리 (condition_controller / condition_controller_file) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.condition.Regulator">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM condition_controller
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+    <resultMap id="regulatorMap" type="com.mes.domain.condition.Regulator">
+        <id property="id" column="id" />
+        <result property="calibYear" column="calib_year" />
+        <result property="equipName" column="equip_name" />
+        <result property="zoneName" column="zone_name" />
+        <result property="stdTemp" column="std_temp" />
+        <result property="measTemp" column="meas_temp" />
+        <result property="deviation" column="deviation" />
+        <result property="regUserName" column="reg_user_name" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <resultMap id="regulatorListMap" type="com.mes.domain.condition.Regulator" extends="regulatorMap">
+        <result property="h1FileCount" column="h1_file_count" />
+        <result property="h2FileCount" column="h2_file_count" />
+    </resultMap>
+
+    <select id="selectList" parameterType="map" resultMap="regulatorListMap">
+        SELECT c.*,
+            (SELECT COUNT(*) FROM condition_controller_file f WHERE f.controller_id = c.id AND f.half = 'H1') AS h1_file_count,
+            (SELECT COUNT(*) FROM condition_controller_file f WHERE f.controller_id = c.id AND f.half = 'H2') AS h2_file_count
+        FROM condition_controller c
+        WHERE c.use_yn = 'Y' AND c.calib_year = #{calibYear}
+        <if test="equipName != null and equipName != ''">
+            AND c.equip_name = #{equipName}
+        </if>
+        ORDER BY c.equip_name ASC, c.zone_name ASC, c.id DESC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM condition_controller
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+    <select id="selectEquipNames" resultType="string">
+        SELECT DISTINCT equip_name FROM condition_controller WHERE use_yn = 'Y' AND equip_name != '' ORDER BY equip_name
     </select>
+
+    <select id="selectById" parameterType="long" resultMap="regulatorMap">
+        SELECT * FROM condition_controller WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.mes.domain.condition.Regulator" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO condition_controller (calib_year, equip_name, zone_name, std_temp, meas_temp, deviation, reg_user_name)
+        VALUES (#{calibYear}, #{equipName}, #{zoneName}, #{stdTemp}, #{measTemp}, #{deviation}, #{regUserName})
+    </insert>
+
+    <update id="updateMeta" parameterType="com.mes.domain.condition.Regulator">
+        UPDATE condition_controller
+        SET calib_year = #{calibYear},
+            equip_name = #{equipName},
+            zone_name = #{zoneName},
+            std_temp = #{stdTemp},
+            meas_temp = #{measTemp},
+            deviation = #{deviation},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE condition_controller SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
+
+    <!-- ── 첨부파일(자식 테이블) ── -->
+
+    <select id="selectFilesByControllerId" parameterType="long" resultType="com.mes.domain.condition.RegulatorFile">
+        SELECT id, controller_id AS controllerId, half, file_name AS fileName,
+               orig_file_name AS origFileName, file_size AS fileSize, reg_dt AS regDt
+        FROM condition_controller_file
+        WHERE controller_id = #{controllerId}
+        ORDER BY half ASC, id ASC
+    </select>
+
+    <select id="selectFileById" parameterType="long" resultType="com.mes.domain.condition.RegulatorFile">
+        SELECT id, controller_id AS controllerId, half, file_name AS fileName,
+               orig_file_name AS origFileName, file_size AS fileSize, reg_dt AS regDt
+        FROM condition_controller_file
+        WHERE id = #{fileId}
+    </select>
+
+    <insert id="insertFile" parameterType="com.mes.domain.condition.RegulatorFile" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO condition_controller_file (controller_id, half, file_name, orig_file_name, file_size)
+        VALUES (#{controllerId}, #{half}, #{fileName}, #{origFileName}, #{fileSize})
+    </insert>
+
+    <delete id="deleteFile" parameterType="long">
+        DELETE FROM condition_controller_file WHERE id = #{fileId}
+    </delete>
 
 </mapper>

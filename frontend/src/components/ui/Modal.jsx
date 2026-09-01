@@ -1,4 +1,4 @@
-export default function Modal({ title, onClose, children, footer, large, xl }) {
+export default function Modal({ title, onClose, children, footer, large, xl, className }) {
   const sizeClass = xl ? 'mes-modal-xl' : large ? 'mes-modal-lg' : '';
   return (
     <div
@@ -7,7 +7,7 @@ export default function Modal({ title, onClose, children, footer, large, xl }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={`mes-modal ${sizeClass}`.trim()}>
+      <div className={`mes-modal ${sizeClass} ${className || ''}`.trim().replace(/\s+/g, ' ')}>
         <div className="mes-modal-header">
           <h3>{title}</h3>
           <button type="button" className="mes-btn mes-btn-ghost" onClick={onClose} aria-label="닫기">

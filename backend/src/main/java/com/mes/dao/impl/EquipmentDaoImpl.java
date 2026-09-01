@@ -14,6 +14,7 @@ import com.mes.domain.equipment.PowerUsage;
 import com.mes.domain.equipment.History;
 import com.mes.domain.equipment.RepairHist;
 import com.mes.domain.equipment.SparePart;
+import com.mes.domain.equipment.SparePartHistory;
 
 @Repository
 public class EquipmentDaoImpl implements EquipmentDao {
@@ -80,14 +81,56 @@ public class EquipmentDaoImpl implements EquipmentDao {
     }
 
     @Override
-    public List<SparePart> selectSparePartList(int offset, int size, String keyword) {
-        return sqlSession.selectList("SparePartMapper.selectList", params(offset, size, keyword));
+    public List<SparePart> selectSparePartList(String equipName, String keyword) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("equipName", equipName);
+        p.put("keyword", keyword);
+        return sqlSession.selectList("SparePartMapper.selectList", p);
     }
 
     @Override
-    public long selectSparePartCount(String keyword) {
-        Long count = sqlSession.selectOne("SparePartMapper.selectCount", params(0, 0, keyword));
-        return count == null ? 0L : count;
+    public List<String> selectSparePartEquipNames() {
+        return sqlSession.selectList("SparePartMapper.selectEquipNames");
+    }
+
+    @Override
+    public SparePart selectSparePartById(Long id) {
+        return sqlSession.selectOne("SparePartMapper.selectById", id);
+    }
+
+    @Override
+    public void insertSparePart(SparePart sparePart) {
+        sqlSession.insert("SparePartMapper.insert", sparePart);
+    }
+
+    @Override
+    public void updateSparePart(SparePart sparePart) {
+        sqlSession.update("SparePartMapper.update", sparePart);
+    }
+
+    @Override
+    public void softDeleteSparePart(Long id) {
+        sqlSession.update("SparePartMapper.softDelete", id);
+    }
+
+    @Override
+    public List<SparePartHistory> selectSparePartHistoryList(Long partId, String type, String from, String to) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("partId", partId);
+        p.put("type", type);
+        p.put("from", from);
+        p.put("to", to);
+        return sqlSession.selectList("SparePartMapper.selectHistoryList", p);
+    }
+
+    @Override
+    public void insertSparePartHistory(SparePartHistory history) {
+        sqlSession.insert("SparePartMapper.insertHistory", history);
+    }
+
+    @Override
+    public void deleteSparePartHistory(Long id) {
+        sqlSession.delete("SparePartMapper.deleteHistory", id);
     }
 
     private Map<String, Object> params(int offset, int size, String keyword) {

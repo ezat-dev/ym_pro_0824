@@ -4,26 +4,68 @@
 
     <!-- 조건관리 > 일상점검일지 (condition_daily_check) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.condition.DailyCheck">
-        SELECT id, use_yn, reg_dt, upd_dt
+    <resultMap id="dailyCheckMap" type="com.mes.domain.condition.DailyCheck">
+        <id property="cnt" column="cnt" />
+        <result property="dTitle" column="d_title" />
+        <result property="dDesc" column="d_desc" />
+        <result property="dYm" column="d_ym" />
+        <result property="imgUrl" column="img_url" />
+        <result property="d01" column="d01" /><result property="d02" column="d02" /><result property="d03" column="d03" />
+        <result property="d04" column="d04" /><result property="d05" column="d05" /><result property="d06" column="d06" />
+        <result property="d07" column="d07" /><result property="d08" column="d08" /><result property="d09" column="d09" />
+        <result property="d10" column="d10" /><result property="d11" column="d11" /><result property="d12" column="d12" />
+        <result property="d13" column="d13" /><result property="d14" column="d14" /><result property="d15" column="d15" />
+        <result property="d16" column="d16" /><result property="d17" column="d17" /><result property="d18" column="d18" />
+        <result property="d19" column="d19" /><result property="d20" column="d20" /><result property="d21" column="d21" />
+        <result property="d22" column="d22" /><result property="d23" column="d23" /><result property="d24" column="d24" />
+        <result property="d25" column="d25" /><result property="d26" column="d26" /><result property="d27" column="d27" />
+        <result property="d28" column="d28" /><result property="d29" column="d29" /><result property="d30" column="d30" />
+        <result property="d31" column="d31" />
+        <result property="dBigo" column="d_bigo" />
+        <result property="valueType" column="value_type" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <select id="selectByYm" parameterType="string" resultMap="dailyCheckMap">
+        SELECT *
         FROM condition_daily_check
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+        WHERE d_ym = #{ym} AND use_yn = 'Y'
+        ORDER BY cnt ASC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
+    <select id="countByYm" parameterType="string" resultType="long">
         SELECT COUNT(*)
         FROM condition_daily_check
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+        WHERE d_ym = #{ym} AND use_yn = 'Y'
     </select>
+
+    <update id="seedMonth" statementType="CALLABLE">
+        {call sp_seed_condition_daily_check(#{ym, mode=IN, jdbcType=VARCHAR})}
+    </update>
+
+    <insert id="insertBlankRow" parameterType="string">
+        INSERT INTO condition_daily_check (d_ym) VALUES (#{ym})
+    </insert>
+
+    <!-- dField는 서비스 계층에서 화이트리스트 검증을 마친 컬럼명만 들어온다(SQL 인젝션 방지). -->
+    <update id="updateField">
+        UPDATE condition_daily_check
+        SET ${dField} = #{dValue}, upd_dt = NOW()
+        WHERE cnt = #{cnt}
+    </update>
+
+    <update id="updateImage">
+        UPDATE condition_daily_check
+        SET img_url = #{imgUrl}, upd_dt = NOW()
+        WHERE cnt = #{cnt}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE condition_daily_check
+        SET use_yn = 'N', upd_dt = NOW()
+        WHERE cnt = #{cnt}
+    </update>
 
 </mapper>

@@ -2,6 +2,12 @@
 Thumbs.db
 *.log
 
+# Claude Code 로컬 툴 설정(세션/머신별 상태, 프로젝트 코드 아님)
+.claude/
+
+# 조건관리 첨부파일 등 런타임에 업로드되는 실제 파일 — 소스가 아니라 데이터라 커밋 대상 아님
+backend/uploads/
+
 # VS Code Java Upgrade 확장이 세션 중 자동 생성하는 폴더(프로젝트와 무관)
 .github/modernize/
 

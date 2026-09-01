@@ -8,6 +8,7 @@ import com.mes.domain.equipment.PowerUsage;
 import com.mes.domain.equipment.History;
 import com.mes.domain.equipment.RepairHist;
 import com.mes.domain.equipment.SparePart;
+import com.mes.domain.equipment.SparePartHistory;
 
 /**
  * 설비관리 전체 메뉴의 데이터 접근 계약.
@@ -34,8 +35,22 @@ public interface EquipmentDao {
 
     long selectRepairHistCount(String keyword);
 
-    List<SparePart> selectSparePartList(int offset, int size, String keyword);
+    List<SparePart> selectSparePartList(String equipName, String keyword);
 
-    long selectSparePartCount(String keyword);
+    List<String> selectSparePartEquipNames();
+
+    SparePart selectSparePartById(Long id);
+
+    void insertSparePart(SparePart sparePart);
+
+    void updateSparePart(SparePart sparePart);
+
+    void softDeleteSparePart(Long id);
+
+    List<SparePartHistory> selectSparePartHistoryList(Long partId, String type, String from, String to);
+
+    void insertSparePartHistory(SparePartHistory history);
+
+    void deleteSparePartHistory(Long id);
 
 }

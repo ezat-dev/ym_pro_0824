@@ -4,26 +4,71 @@
 
     <!-- 조건관리 > 열처리유성상분석 (condition_oil_analysis) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.condition.OilAnalysis">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM condition_oil_analysis
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+    <resultMap id="oilAnalysisMap" type="com.mes.domain.condition.OilAnalysis">
+        <id property="id" column="id" />
+        <result property="crDate" column="cr_date" />
+        <result property="mchName" column="mch_name" />
+        <result property="memo" column="memo" />
+        <result property="box1FileName" column="box1_file_name" />
+        <result property="box1OrigFileName" column="box1_orig_file_name" />
+        <result property="box1FileSize" column="box1_file_size" />
+        <result property="box2FileName" column="box2_file_name" />
+        <result property="box2OrigFileName" column="box2_orig_file_name" />
+        <result property="box2FileSize" column="box2_file_size" />
+        <result property="box3FileName" column="box3_file_name" />
+        <result property="box3OrigFileName" column="box3_orig_file_name" />
+        <result property="box3FileSize" column="box3_file_size" />
+        <result property="box4FileName" column="box4_file_name" />
+        <result property="box4OrigFileName" column="box4_orig_file_name" />
+        <result property="box4FileSize" column="box4_file_size" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <select id="selectList" parameterType="map" resultMap="oilAnalysisMap">
+        SELECT * FROM condition_oil_analysis
+        WHERE use_yn = 'Y'
+        <if test="from != null and from != ''">AND cr_date &gt;= #{from}</if>
+        <if test="to != null and to != ''">AND cr_date &lt;= #{to}</if>
+        <if test="mchName != null and mchName != ''">AND mch_name = #{mchName}</if>
+        ORDER BY cr_date DESC, id DESC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM condition_oil_analysis
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+    <select id="selectMchNames" resultType="string">
+        SELECT DISTINCT mch_name FROM condition_oil_analysis WHERE use_yn = 'Y' AND mch_name != '' ORDER BY mch_name
     </select>
+
+    <select id="selectById" parameterType="long" resultMap="oilAnalysisMap">
+        SELECT * FROM condition_oil_analysis WHERE id = #{id}
+    </select>
+
+    <!-- Standard.insert와 동일한 이유로 file류는 컬럼 기본값(빈 문자열/0)에 맡긴다 — 생성된 id로
+         파일명을 만들어야 해서 메타부터 먼저 insert한다. -->
+    <insert id="insert" parameterType="com.mes.domain.condition.OilAnalysis" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO condition_oil_analysis (cr_date, mch_name, memo)
+        VALUES (#{crDate}, #{mchName}, #{memo})
+    </insert>
+
+    <update id="updateMeta" parameterType="com.mes.domain.condition.OilAnalysis">
+        UPDATE condition_oil_analysis
+        SET cr_date = #{crDate}, mch_name = #{mchName}, memo = #{memo}, upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- boxPrefix는 서비스 계층에서 "box1_".."box4_" 중 하나로 화이트리스트 검증을 마친 값만 들어온다
+         (SQL 인젝션 방지 — DailyCheckMapper.updateField의 ${dField} 패턴과 동일 원칙). -->
+    <update id="updateBoxFile">
+        UPDATE condition_oil_analysis
+        SET ${boxPrefix}file_name = #{fileName},
+            ${boxPrefix}orig_file_name = #{origFileName},
+            ${boxPrefix}file_size = #{fileSize},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE condition_oil_analysis SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
 
 </mapper>

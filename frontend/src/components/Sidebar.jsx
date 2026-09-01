@@ -7,6 +7,7 @@ import {
 } from '@tabler/icons-react';
 import MENU_DATA from '../constants/menuData';
 import { useAuth } from '../context/AuthContext';
+import { useSidebar } from '../context/SidebarContext';
 
 // 대분류별 아이콘 매핑
 const CATEGORY_ICONS = {
@@ -21,7 +22,7 @@ const CATEGORY_ICONS = {
 const ACCENT = '#5b7fc7';
 
 export default function Sidebar({ menuData = MENU_DATA, mobileOpen = false, onCloseMobile }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, setCollapsed } = useSidebar();
   // 첫 번째 그룹만 기본 펼침
   const [openGroups, setOpenGroups] = useState(() => new Set([menuData[0]?.category]));
   const navigate = useNavigate();

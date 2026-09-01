@@ -4,26 +4,67 @@
 
     <!-- 조건관리 > 관리계획서 및 작업표준서 (condition_standard) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.condition.Standard">
-        SELECT id, use_yn, reg_dt, upd_dt
+    <resultMap id="standardMap" type="com.mes.domain.condition.Standard">
+        <id property="id" column="id" />
+        <result property="docTitle" column="doc_title" />
+        <result property="docCategory" column="doc_category" />
+        <result property="equipName" column="equip_name" />
+        <result property="revNo" column="rev_no" />
+        <result property="effectiveDate" column="effective_date" />
+        <result property="fileName" column="file_name" />
+        <result property="origFileName" column="orig_file_name" />
+        <result property="fileSize" column="file_size" />
+        <result property="remark" column="remark" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <select id="selectList" parameterType="map" resultMap="standardMap">
+        SELECT *
         FROM condition_standard
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+        WHERE use_yn = 'Y'
+        <if test="category != null and category != ''">
+            AND doc_category = #{category}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND doc_title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
         ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM condition_standard
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+    <select id="selectById" parameterType="long" resultMap="standardMap">
+        SELECT * FROM condition_standard WHERE id = #{id}
     </select>
+
+    <!-- 파일 저장 전 메타데이터만 먼저 insert하므로(생성된 id로 파일명을 만들어야 해서) file_name류는 컬럼 기본값(빈 문자열/0)에 맡기고 여기서 넣지 않는다. -->
+    <insert id="insert" parameterType="com.mes.domain.condition.Standard" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO condition_standard
+            (doc_title, doc_category, equip_name, rev_no, effective_date, remark)
+        VALUES
+            (#{docTitle}, #{docCategory}, #{equipName}, #{revNo}, #{effectiveDate}, #{remark})
+    </insert>
+
+    <update id="updateMeta" parameterType="com.mes.domain.condition.Standard">
+        UPDATE condition_standard
+        SET doc_title = #{docTitle},
+            doc_category = #{docCategory},
+            equip_name = #{equipName},
+            rev_no = #{revNo},
+            effective_date = #{effectiveDate},
+            remark = #{remark},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateFile">
+        UPDATE condition_standard
+        SET file_name = #{fileName}, orig_file_name = #{origFileName}, file_size = #{fileSize}, upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE condition_standard SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
 
 </mapper>

@@ -2,30 +2,32 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { IconMenu2 } from '@tabler/icons-react';
 import Sidebar from '../components/Sidebar';
+import { SidebarProvider } from '../context/SidebarContext';
 
 export default function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
+    <SidebarProvider>
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+        <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <div className="mes-mobile-header">
-          <button
-            className="mes-mobile-header-btn"
-            onClick={() => setMobileOpen(true)}
-            aria-label="메뉴 열기"
-          >
-            <IconMenu2 size={20} />
-          </button>
-          <span className="mes-mobile-header-title">SMART MES</span>
-        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div className="mes-mobile-header">
+            <button
+              className="mes-mobile-header-btn"
+              onClick={() => setMobileOpen(true)}
+              aria-label="메뉴 열기"
+            >
+              <IconMenu2 size={20} />
+            </button>
+            <span className="mes-mobile-header-title">SMART MES</span>
+          </div>
 
-        <div style={{ flex: 1, overflow: 'auto', background: '#f5f6f8' }}>
-          <Outlet />
+          <div style={{ flex: 1, overflow: 'auto', background: '#f5f6f8' }}>
+            <Outlet />
+          </div>
         </div>
-      </div>
 
       <style>{`
         .mes-mobile-header {
@@ -59,6 +61,7 @@ export default function MainLayout() {
           }
         }
       `}</style>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 }

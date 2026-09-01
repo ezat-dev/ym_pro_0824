@@ -2,28 +2,63 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="SensorMapper">
 
-    <!-- 조건관리 > 열전대/센서 관리 (condition_sensor) -->
+    <!-- 조건관리 > 열전대/센서 관리 (condition_sensor) — 설비/존(zone)별 연간 열전대·센서 교체이력 -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.condition.Sensor">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM condition_sensor
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+    <resultMap id="sensorMap" type="com.mes.domain.condition.Sensor">
+        <id property="id" column="id" />
+        <result property="year" column="year" />
+        <result property="equipName" column="equip_name" />
+        <result property="sensorType" column="sensor_type" />
+        <result property="zoneName" column="zone_name" />
+        <result property="prevChangeDate" column="prev_change_date" />
+        <result property="changeDate" column="change_date" />
+        <result property="nextChangeDate" column="next_change_date" />
+        <result property="remark" column="remark" />
+        <result property="regUserName" column="reg_user_name" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <!-- LAG는 동일 설비/존/구분의 전체 연도 이력을 봐야 하므로 먼저 전체를 계산한 뒤 바깥 SELECT에서 연도로
+         필터한다 — 연도로 먼저 필터하면 LAG가 볼 이전 행이 없어져 항상 NULL이 된다. -->
+    <select id="selectList" parameterType="map" resultMap="sensorMap">
+        SELECT * FROM (
+            SELECT id, year, equip_name, sensor_type, zone_name, change_date, next_change_date, remark,
+                   reg_user_name, use_yn, reg_dt, upd_dt,
+                   LAG(change_date) OVER (PARTITION BY equip_name, zone_name, sensor_type ORDER BY year) AS prev_change_date
+            FROM condition_sensor
+            WHERE use_yn = 'Y'
+        ) t
+        WHERE t.year = #{year}
+        <if test="sensorType != null and sensorType != ''">
+            AND t.sensor_type = #{sensorType}
+        </if>
+        ORDER BY t.sensor_type ASC, t.equip_name ASC, t.id ASC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM condition_sensor
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-    </select>
+    <insert id="insert" parameterType="com.mes.domain.condition.Sensor" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO condition_sensor
+            (year, equip_name, sensor_type, zone_name, change_date, next_change_date, remark, reg_user_name)
+        VALUES
+            (#{year}, #{equipName}, #{sensorType}, #{zoneName}, #{changeDate}, #{nextChangeDate}, #{remark}, #{regUserName})
+    </insert>
+
+    <update id="updateFull" parameterType="com.mes.domain.condition.Sensor">
+        UPDATE condition_sensor
+        SET year = #{year},
+            equip_name = #{equipName},
+            sensor_type = #{sensorType},
+            zone_name = #{zoneName},
+            change_date = #{changeDate},
+            next_change_date = #{nextChangeDate},
+            remark = #{remark},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE condition_sensor SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
 
 </mapper>

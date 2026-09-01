@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.mes.domain.condition.Sensor;
 import com.mes.domain.condition.Regulator;
+import com.mes.domain.condition.RegulatorFile;
 import com.mes.domain.condition.OilAnalysis;
 import com.mes.domain.condition.DailyCheck;
 import com.mes.domain.condition.Standard;
@@ -13,24 +14,72 @@ import com.mes.domain.condition.Standard;
  */
 public interface ConditionDao {
 
-    List<Sensor> selectSensorList(int offset, int size, String keyword);
+    List<Sensor> selectSensorList(int year, String sensorType);
 
-    long selectSensorCount(String keyword);
+    void insertSensor(Sensor sensor);
 
-    List<Regulator> selectRegulatorList(int offset, int size, String keyword);
+    void updateSensor(Sensor sensor);
 
-    long selectRegulatorCount(String keyword);
+    void softDeleteSensor(Long id);
 
-    List<OilAnalysis> selectOilAnalysisList(int offset, int size, String keyword);
+    List<Regulator> selectRegulatorList(Integer calibYear, String equipName);
 
-    long selectOilAnalysisCount(String keyword);
+    List<String> selectRegulatorEquipNames();
 
-    List<DailyCheck> selectDailyCheckList(int offset, int size, String keyword);
+    Regulator selectRegulatorById(Long id);
 
-    long selectDailyCheckCount(String keyword);
+    void insertRegulator(Regulator regulator);
 
-    List<Standard> selectStandardList(int offset, int size, String keyword);
+    void updateRegulatorMeta(Regulator regulator);
 
-    long selectStandardCount(String keyword);
+    void softDeleteRegulator(Long id);
+
+    List<RegulatorFile> selectRegulatorFilesByControllerId(Long controllerId);
+
+    RegulatorFile selectRegulatorFileById(Long fileId);
+
+    void insertRegulatorFile(RegulatorFile file);
+
+    void deleteRegulatorFile(Long fileId);
+
+    List<OilAnalysis> selectOilAnalysisList(String from, String to, String mchName);
+
+    List<String> selectOilAnalysisMchNames();
+
+    OilAnalysis selectOilAnalysisById(Long id);
+
+    void insertOilAnalysis(OilAnalysis oilAnalysis);
+
+    void updateOilAnalysisMeta(OilAnalysis oilAnalysis);
+
+    void updateOilAnalysisBoxFile(Long id, String boxPrefix, String fileName, String origFileName, Long fileSize);
+
+    void softDeleteOilAnalysis(Long id);
+
+    List<DailyCheck> selectDailyCheckByYm(String ym);
+
+    long countDailyCheckByYm(String ym);
+
+    void seedDailyCheckMonth(String ym);
+
+    void insertDailyCheckRow(String ym);
+
+    void updateDailyCheckField(Long cnt, String dField, String dValue);
+
+    void updateDailyCheckImage(Long cnt, String imgUrl);
+
+    void softDeleteDailyCheck(Long cnt);
+
+    List<Standard> selectStandardList(String category, String keyword);
+
+    Standard selectStandardById(Long id);
+
+    void insertStandard(Standard standard);
+
+    void updateStandardMeta(Standard standard);
+
+    void updateStandardFile(Long id, String fileName, String origFileName, Long fileSize);
+
+    void softDeleteStandard(Long id);
 
 }
