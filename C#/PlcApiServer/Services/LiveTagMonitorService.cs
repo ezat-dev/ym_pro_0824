@@ -24,7 +24,7 @@
 //        b) PLC(plc_id)+디바이스(D/M/L/X/Y/B/W/R)별로 묶어서, 두 출처의 주소를 합친 뒤
 //           ReadWordsBatchAsync로 "연결 1개"로 순서대로 읽는다.
 //        c) 알람 출처 결과는 "그 PLC 그룹의 읽기가 끝나는 즉시"(다른 PLC를 기다리지 않고)
-//           _alarmState와 비교해 전환된 것만 tb_alarm_history에 기록(ProcessAlarmTransitionsAsync).
+//           AlarmTagValues(직전 상태)와 비교해 전환된 것만 tb_alarm_history에 기록(ProcessAlarmTransitionsAsync).
 //           폴더태그 출처 결과는 FolderTagValues[tagId]에 그대로 저장(DB 미기록).
 //   3) Program.cs의 /api/foldertag/values 엔드포인트가 이 인스턴스를 DI로 주입받아
 //      FolderTagValues를 즉시 JSON으로 반환한다 (PLC 통신 없이 응답).
@@ -65,8 +65,9 @@ public class LiveTagMonitorService : BackgroundService
     public ConcurrentDictionary<int, int?> FolderTagValues { get; } = new();
     public DateTime? LastPollAt { get; private set; }
 
-    // ── 알람 상태 캐시 (tagId → 마지막 ON/OFF) — DB는 전환시에만 씀 ─────────────
-    private readonly ConcurrentDictionary<int, bool> _alarmState = new();
+    // ── 알람 상태 캐시 (tagId → 마지막 ON/OFF) — DB는 전환시에만 씀. 원래는 전환 감지에만 쓰던
+    // private 필드였는데, "실시간 모니터링" 화면이 알람 현재 상태를 그대로 보여줘야 해서 공개했다.
+    public ConcurrentDictionary<int, bool> AlarmTagValues { get; } = new();
 
     // ── 태그 목록 캐시 (알람/폴더태그 각각) ──────────────────────────────────
     private List<AlarmTagRow>? _cachedAlarmTags;
@@ -133,6 +134,19 @@ public class LiveTagMonitorService : BackgroundService
             _cachedAlarmTags  = await LoadAlarmTagsAsync(ct);
             _cachedFolderTags = await LoadFolderTagsAsync(ct);
             _tagsCachedAt     = DateTime.UtcNow;
+
+            // 더 이상 유효하지 않게 된(비활성화/삭제/주소 파싱 실패로 목록에서 빠진) 폴더태그의
+            // 예전 값을 FolderTagValues에서 지운다 — 안 지우면 "언제 읽힌 값인지 알 수 없는
+            // 찌꺼기"가 API 응답에 영원히 섞여 나온다(예: 주소를 잘못 고쳤다가 태그가 폴링
+            // 목록에서 빠져도, 고치기 전 마지막 정상값을 계속 실시간 값인 것처럼 보여줬었다).
+            var validFolderTagIds = new HashSet<int>(_cachedFolderTags.Select(t => t.TagId));
+            foreach (var staleId in FolderTagValues.Keys.Where(id => !validFolderTagIds.Contains(id)).ToList())
+                FolderTagValues.TryRemove(staleId, out _);
+
+            var validAlarmTagIds = new HashSet<int>(_cachedAlarmTags.Select(t => t.TagId));
+            foreach (var staleId in AlarmTagValues.Keys.Where(id => !validAlarmTagIds.Contains(id)).ToList())
+                AlarmTagValues.TryRemove(staleId, out _);
+
             _logger.LogDebug("Tag cache refreshed: alarm={AlarmCount}, folderTag={FolderCount}",
                 _cachedAlarmTags.Count, _cachedFolderTags.Count);
         }
@@ -217,7 +231,7 @@ public class LiveTagMonitorService : BackgroundService
         var toWrite = new List<(int TagId, bool IsOn, int Raw)>();
         foreach (var (tagId, isOn, raw) in results)
         {
-            bool prev = _alarmState.GetOrAdd(tagId, _ => false);
+            bool prev = AlarmTagValues.GetOrAdd(tagId, _ => false);
             if (!isFirstPoll && isOn == prev) continue;
             toWrite.Add((tagId, isOn, raw));
             if (isFirstPoll)
@@ -234,7 +248,7 @@ public class LiveTagMonitorService : BackgroundService
         foreach (var (tagId, isOn, raw) in toWrite)
         {
             await ApplyAlarmTransitionAsync(conn, tagId, isOn, raw, ct);
-            _alarmState[tagId] = isOn;
+            AlarmTagValues[tagId] = isOn;
             _logger.LogDebug("Alarm DB updated: tagId={TagId} isOn={IsOn}", tagId, isOn);
         }
     }
@@ -359,7 +373,10 @@ SELECT t.id, t.address, t.type,
     }
 
     // "D100"/"M50"/"0xC9" → (디바이스, 숫자주소). 접두어 없으면 D로 간주.
-    private static (string Device, int Addr)? ParseAddressFull(string? address)
+    // internal로 열어둔 이유: Program.cs의 이름/주소 기반 조회·쓰기 엔드포인트가 folders_tags.address
+    // 문자열을 파싱할 때 이 로직을 그대로 재사용한다 — 똑같은 파싱 규칙을 두 곳에 따로 구현하면
+    // 나중에 한쪽만 고쳐서 어긋나기 쉽기 때문에 하나로 공유한다.
+    internal static (string Device, int Addr)? ParseAddressFull(string? address)
     {
         if (string.IsNullOrWhiteSpace(address)) return null;
         address = address.Trim();
@@ -376,6 +393,27 @@ SELECT t.id, t.address, t.type,
 
         string device  = i > 0 ? address[..i].ToUpperInvariant() : "D";
         string numPart = address[i..];
+
+        // X/Y(미쓰비시 입출력 접점) 주소는 실제 현장에서 8진수 라벨(Y110~Y117 등, 실제 물리
+        // 상태와 일치하는 걸로 확인됨)과 16진수 블록(Y118~Y11F, X04A/X04B처럼 8진수로는 애초에
+        // 표현 안 되는 8/9/A~F 포함)이 "같은 시스템 안에 실제로 섞여" 들어온다 — 그래서 무조건
+        // 한쪽으로 통일하면 안 되고, 자릿수가 전부 0~7이면 8진수(기존 방식 그대로 보존),
+        // 8/9나 A~F가 하나라도 있으면 그때만 16진수로 해석한다.
+        // 예: Y110(전부 0~7) → 8진수 72,  Y118(8 포함) → 16진수 0x118=280,  X04A → 16진수 0x4A=74.
+        // PlcService.Mitsubishi.cs의 ResolveMitsubishiAddress는 X/Y도 그대로 통과만 시킨다 —
+        // 8진수든 16진수든 변환이 이미 여기서 끝나서 "프레임에 넣을 최종 값"까지 확정해 넘기기 때문.
+        if (device is "X" or "Y")
+        {
+            bool validOctal = numPart.Length > 0 && numPart.All(c => c is >= '0' and <= '7');
+            if (validOctal)
+            {
+                try { return (device, Convert.ToInt32(numPart, 8)); }
+                catch { return null; }
+            }
+            if (int.TryParse(numPart, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int hexAddr))
+                return (device, hexAddr);
+            return null;
+        }
 
         if (int.TryParse(numPart, out int v))
             return (device, v);

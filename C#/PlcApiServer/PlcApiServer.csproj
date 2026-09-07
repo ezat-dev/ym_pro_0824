@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MySqlConnector" Version="2.3.7" />
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
   </ItemGroup>
 </Project>

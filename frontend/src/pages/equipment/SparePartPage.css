@@ -1,0 +1,230 @@
+/* 설비관리 > SPARE 부품관리 — 설비별 스페어부품 재고 + 입출고 이력 */
+
+.spr-page-icon {
+  background: linear-gradient(135deg, #6fc0a8 0%, #2d8a6b 100%);
+  box-shadow: 0 6px 16px -4px rgba(45, 138, 107, 0.45);
+}
+
+.spr-page .mes-field textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius);
+  outline: none;
+  background: #fff;
+  resize: vertical;
+  font-family: inherit;
+  font-size: inherit;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.spr-page .mes-field textarea:focus {
+  border-color: var(--mes-accent);
+  box-shadow: 0 0 0 3px var(--mes-accent-soft);
+}
+
+/* ── 상단 헤더 카드 ── */
+
+.spr-header-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 20px 22px;
+  margin-bottom: 20px;
+}
+
+.spr-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.spr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.spr-header-sep {
+  height: 1px;
+  background: var(--mes-line);
+  margin: 18px 0 16px;
+}
+
+/* ── 탭 ── */
+
+.spr-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.spr-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--mes-text-faint);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-right: 18px;
+  transition: color .12s ease, border-color .12s ease;
+}
+
+.spr-tab:hover {
+  color: var(--mes-text-sub);
+}
+
+.spr-tab.active {
+  color: var(--mes-accent-dark);
+  border-bottom-color: var(--mes-accent);
+}
+
+.spr-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.spr-header-controls span {
+  color: var(--mes-text-faint);
+  font-size: 12px;
+}
+
+.spr-header-spacer {
+  flex: 1;
+}
+
+.spr-doc-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-accent-dark);
+  background: var(--mes-accent-soft);
+  padding: 4px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ── 그리드 셀 렌더링 ── */
+
+.spr-empty {
+  color: var(--mes-text-faint);
+}
+
+.spr-part-name {
+  font-weight: 700;
+  color: var(--mes-text);
+  letter-spacing: -0.1px;
+}
+
+.spr-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--mes-text-sub);
+}
+
+.spr-meta-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--mes-text-faint);
+  font-size: 12.5px;
+}
+
+.spr-stock-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--mes-text);
+}
+
+.spr-stock-value.warn {
+  color: var(--mes-warning);
+}
+
+.spr-stock-value.danger {
+  color: var(--mes-danger);
+}
+
+.spr-status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--mes-text-sub);
+}
+
+.spr-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--mes-success);
+}
+
+.spr-status-dot.warn {
+  background: var(--mes-warning);
+}
+
+.spr-status-dot.danger {
+  background: var(--mes-danger);
+}
+
+.spr-type-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--mes-text-sub);
+}
+
+.spr-type-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.spr-type-dot.in {
+  background: var(--mes-success);
+}
+
+.spr-type-dot.out {
+  background: var(--mes-accent);
+}
+
+.spr-hist-delete {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  cursor: pointer;
+}
+
+.spr-hist-delete:hover {
+  color: var(--mes-danger);
+  text-decoration: underline;
+}
+
+/* ── 표 영역: 헤더 카드 아래 남는 공간을 전부 채우고, 페이지네이션 대신 내부 스크롤 ── */
+
+.spr-table-card {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.spr-table-wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

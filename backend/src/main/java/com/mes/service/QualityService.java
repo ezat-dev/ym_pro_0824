@@ -1,5 +1,10 @@
 package com.mes.service;
 
+import java.util.List;
+
+import org.springframework.core.io.Resource;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.mes.common.response.PageResponse;
 import com.mes.domain.quality.Cpk;
 import com.mes.domain.quality.Ppk;
@@ -16,7 +21,19 @@ public interface QualityService {
 
     PageResponse<Fproof> getFproofList(int page, int size, String keyword);
 
-    PageResponse<TempUniform> getTempUniformList(int page, int size, String keyword);
+    List<TempUniform> getTempUniformList(String equipName, String judgment, String from, String to);
+
+    List<String> getTempUniformEquipNames();
+
+    TempUniform getTempUniformById(Long id);
+
+    TempUniform createTempUniform(TempUniform tempUniform, MultipartFile file);
+
+    TempUniform updateTempUniform(Long id, TempUniform tempUniform, MultipartFile file);
+
+    void deleteTempUniform(Long id);
+
+    Resource loadTempUniformFile(String fileName);
 
     PageResponse<Hardness> getHardnessList(int page, int size, String keyword);
 

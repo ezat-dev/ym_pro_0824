@@ -58,14 +58,48 @@ public class QualityDaoImpl implements QualityDao {
     }
 
     @Override
-    public List<TempUniform> selectTempUniformList(int offset, int size, String keyword) {
-        return sqlSession.selectList("TempUniformMapper.selectList", params(offset, size, keyword));
+    public List<TempUniform> selectTempUniformList(String equipName, String judgment, String from, String to) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("equipName", equipName);
+        p.put("judgment", judgment);
+        p.put("from", from);
+        p.put("to", to);
+        return sqlSession.selectList("TempUniformMapper.selectList", p);
     }
 
     @Override
-    public long selectTempUniformCount(String keyword) {
-        Long count = sqlSession.selectOne("TempUniformMapper.selectCount", params(0, 0, keyword));
-        return count == null ? 0L : count;
+    public List<String> selectTempUniformEquipNames() {
+        return sqlSession.selectList("TempUniformMapper.selectEquipNames");
+    }
+
+    @Override
+    public TempUniform selectTempUniformById(Long id) {
+        return sqlSession.selectOne("TempUniformMapper.selectById", id);
+    }
+
+    @Override
+    public void insertTempUniform(TempUniform tempUniform) {
+        sqlSession.insert("TempUniformMapper.insert", tempUniform);
+    }
+
+    @Override
+    public void updateTempUniform(TempUniform tempUniform) {
+        sqlSession.update("TempUniformMapper.updateMeta", tempUniform);
+    }
+
+    @Override
+    public void updateTempUniformFile(Long id, String fileName, String origFileName, long fileSize) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("id", id);
+        p.put("fileName", fileName);
+        p.put("origFileName", origFileName);
+        p.put("fileSize", fileSize);
+        sqlSession.update("TempUniformMapper.updateFile", p);
+    }
+
+    @Override
+    public void softDeleteTempUniform(Long id) {
+        sqlSession.update("TempUniformMapper.softDelete", id);
     }
 
     @Override

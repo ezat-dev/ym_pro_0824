@@ -1,0 +1,462 @@
+/* 품질관리 > 온도균일성보고서 — 로(furnace) 온도균일성조사(TUS) 기록 */
+
+.tu-page-icon {
+  background: linear-gradient(135deg, #f6ad55 0%, #b7591c 100%);
+  box-shadow: 0 6px 16px -4px rgba(183, 89, 28, 0.45);
+}
+
+/* ── 상단 헤더 카드 ── */
+
+.tu-header-card {
+  background: var(--mes-surface);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-sm);
+  padding: 20px 22px;
+  margin-bottom: 20px;
+}
+
+.tu-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tu-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tu-header-sep {
+  height: 1px;
+  background: var(--mes-line);
+  margin: 18px 0 16px;
+}
+
+.tu-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tu-range-sep {
+  color: var(--mes-text-faint);
+  font-size: 12px;
+}
+
+.tu-header-spacer {
+  flex: 1;
+}
+
+.tu-doc-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-text-sub);
+  background: var(--mes-surface-alt, #f4f5f7);
+  padding: 4px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.tu-count-pass {
+  color: var(--mes-success);
+}
+
+.tu-count-fail {
+  color: var(--mes-danger);
+}
+
+/* ── 그리드 셀 렌더링 ── */
+
+.tu-empty {
+  color: var(--mes-text-faint);
+}
+
+.tu-equip-name {
+  font-weight: 700;
+  color: var(--mes-text);
+  letter-spacing: -0.1px;
+}
+
+.tu-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--mes-text-sub);
+}
+
+.tu-deviation {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--mes-text);
+  letter-spacing: -0.2px;
+}
+
+.tu-judgment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.tu-judgment-tag.pass { color: var(--mes-success); }
+.tu-judgment-tag.fail { color: var(--mes-danger); }
+
+.tu-judgment-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.tu-meta-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--mes-text-faint);
+  font-size: 12.5px;
+}
+
+.tu-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--mes-accent-dark);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tu-file-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tu-file-chip:hover {
+  text-decoration: underline;
+}
+
+/* ── 표 영역 ── */
+
+.tu-table-card {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tu-table-wrap {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 등록/수정 모달 ── */
+
+.tu-preview-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+}
+
+.tu-dropzone-wrap {
+  margin-top: 4px;
+}
+
+.tu-dropzone-wrap label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mes-text-sub);
+  margin-bottom: 6px;
+}
+
+.tu-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1.5px dashed var(--mes-border);
+  border-radius: var(--mes-radius);
+  background: #fafbfc;
+  color: var(--mes-text-faint);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+
+.tu-dropzone:hover {
+  border-color: var(--mes-accent);
+  background: var(--mes-accent-soft);
+  color: var(--mes-accent-dark);
+}
+
+.tu-file-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tu-file-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--mes-line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #d9483f;
+}
+
+.tu-file-list li.tu-file-new {
+  background: var(--mes-accent-soft);
+  border-color: rgba(91, 127, 199, 0.3);
+}
+
+.tu-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mes-text);
+}
+
+.tu-file-size {
+  flex-shrink: 0;
+  color: var(--mes-text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.tu-file-list li button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--mes-text-faint);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tu-file-list li button:hover {
+  background: var(--mes-danger-soft);
+  color: var(--mes-danger);
+}
+
+/* ── PDF 미리보기 모달 ── */
+
+.tu-viewer-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.tu-viewer-iframe {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid var(--mes-line);
+  border-radius: var(--mes-radius);
+}
+
+/* ── 인쇄 미리보기 ── */
+
+.tu-print-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.tu-print-sheet {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid var(--mes-line);
+  border-radius: var(--mes-radius);
+  padding: 36px 40px;
+  font-family: 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+}
+
+.tu-print-header {
+  text-align: center;
+  border-bottom: 3px double #1a1a1a;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+
+.tu-print-header h1 {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  margin: 0 0 4px;
+}
+
+.tu-print-subtitle {
+  margin: 0;
+  font-size: 11.5px;
+  letter-spacing: 2px;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.tu-print-meta {
+  display: flex;
+  gap: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.tu-print-meta > div {
+  flex: 1;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tu-print-meta > div:not(:last-child) {
+  border-right: 1px solid #d1d5db;
+}
+
+.tu-print-meta span {
+  font-size: 10.5px;
+  color: #6b7280;
+  letter-spacing: 0.5px;
+}
+
+.tu-print-meta strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tu-print-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.tu-print-table th,
+.tu-print-table td {
+  border: 1px solid #9ca3af;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.tu-print-table th {
+  background: #f3f4f6;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tu-print-table tr {
+  break-inside: avoid;
+}
+
+.tu-print-center {
+  text-align: center;
+}
+
+.tu-print-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tu-print-judgment {
+  font-weight: 800;
+}
+
+.tu-print-judgment.pass { color: #15803d; }
+.tu-print-judgment.fail { color: #b91c1c; }
+
+.tu-print-empty {
+  text-align: center;
+  color: #9ca3af;
+  padding: 24px 0 !important;
+}
+
+.tu-print-sign {
+  display: flex;
+  gap: 0;
+  margin-top: 28px;
+  border: 1px solid #9ca3af;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tu-print-sign > div {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+}
+
+.tu-print-sign > div:not(:last-child) {
+  border-right: 1px solid #9ca3af;
+}
+
+.tu-print-sign span {
+  width: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  font-size: 12px;
+  font-weight: 700;
+  border-right: 1px solid #9ca3af;
+}
+
+.tu-print-sign em {
+  flex: 1;
+  min-height: 48px;
+  font-style: normal;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .tu-print-sheet,
+  .tu-print-sheet * {
+    visibility: visible;
+  }
+  .tu-print-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+  }
+  @page {
+    margin: 14mm;
+  }
+}

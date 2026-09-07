@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   IconClipboardCheck, IconSearch, IconPlus, IconTrash, IconFileSpreadsheet, IconLock,
-  IconEdit, IconDeviceTablet, IconChevronLeft, IconChevronRight,
+  IconDeviceTablet, IconChevronLeft, IconChevronRight,
 } from '@tabler/icons-react';
 import DataTable from '../../components/ui/DataTable';
 import Modal from '../../components/ui/Modal';
@@ -29,6 +29,13 @@ function daysInMonth(ym) {
 }
 
 const VALUE_TYPE_LABEL = { check: 'OK/NG', number: '숫자', text: '문자' };
+
+// Tabulator 컬럼 field(camelCase)와 실제 DB 컬럼명(snake_case)이 다른 필드만 매핑한다.
+// d01~d31은 그대로 일치해서 매핑이 필요 없다.
+const DB_FIELD_MAP = { dTitle: 'd_title', dDesc: 'd_desc', dBigo: 'd_bigo', valueType: 'value_type' };
+function toDbField(field) {
+  return DB_FIELD_MAP[field] ?? field;
+}
 
 // Tabulator formatter는 HTML 문자열만 받으므로 React 아이콘 컴포넌트 대신 인라인 SVG를 쓴다.
 const DC_IMAGE_ICON =
@@ -78,7 +85,6 @@ export default function DailyCheckPage() {
   const [ymInput, setYmInput] = useState(currentYm());
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [tabletMode, setTabletMode] = useState(false);
   const [tabletCenterDay, setTabletCenterDay] = useState(() => new Date().getDate());
   const [insertModalOpen, setInsertModalOpen] = useState(false);
@@ -139,7 +145,7 @@ export default function DailyCheckPage() {
 
   const handleCellEdited = useCallback(
     (cell) => {
-      const field = cell.getField();
+      const field = toDbField(cell.getField());
       const value = cell.getValue();
       const cnt = cell.getRow().getData().cnt;
       updateField(cnt, field, value ?? '').catch(() => {
@@ -202,11 +208,14 @@ export default function DailyCheckPage() {
         setInsertModalOpen(false);
         setYm(insertYm);
         setYmInput(insertYm);
+        // setYm은 insertYm이 현재 조회 중인 월과 같으면(=값이 안 바뀌면) effect가 재실행되지
+        // 않아 새로 추가한 행이 화면에 안 보인다 — 그래서 항상 명시적으로 한 번 더 불러온다.
+        fetchList(insertYm);
       } catch (e2) {
         showToast('행 추가에 실패했습니다.', 'error');
       }
     },
-    [insertYm, showToast]
+    [insertYm, showToast, fetchList]
   );
 
   const handleExportExcel = useCallback(() => {
@@ -239,10 +248,10 @@ export default function DailyCheckPage() {
   }, [ym, tabletMode, tabletCenterDay]);
 
   const columns = useMemo(() => {
-    const canEdit = editMode && permission.canUpdate;
+    const canEdit = permission.canUpdate;
     const todayCol = ym === currentYm() ? new Date().getDate() : null;
     // 태블릿 모드: 고정 컬럼들 너비를 뺀 나머지를 날짜 수만큼 나눠 화면을 꽉 채운다.
-    const FROZEN_WIDTH = (editMode ? 40 : 0) + 56 + 260 + 76 + 80 + 60 + 16;
+    const FROZEN_WIDTH = (permission.canDelete ? 40 : 0) + 56 + 260 + 76 + 80 + 60 + 16;
     const tabletDayWidth = gridWidth
       ? Math.max(90, Math.floor((gridWidth - FROZEN_WIDTH) / dayWindow.length))
       : 90;
@@ -259,19 +268,23 @@ export default function DailyCheckPage() {
       editor: canEdit ? dailyValueEditor : false,
       formatter: dailyValueFormatter,
       cellClick: (e, cell) => {
-        if (!canEdit || cell.getRow().getData().valueType !== 'check') return;
+        if (!canEdit) {
+          showToast('수정 권한이 없습니다.', 'error');
+          return;
+        }
+        if (cell.getRow().getData().valueType !== 'check') return;
         const current = cell.getValue();
         const next = current === 'OK' ? 'NG' : current === 'NG' ? '' : 'OK';
         cell.setValue(next);
         const cnt = cell.getRow().getData().cnt;
-        updateField(cnt, cell.getField(), next).catch(() => {
+        updateField(cnt, toDbField(cell.getField()), next).catch(() => {
           showToast('저장에 실패했습니다.', 'error');
           fetchList(ym);
         });
       },
     }));
     const cols = [];
-    if (editMode) {
+    if (permission.canDelete) {
       cols.push({ formatter: 'rowSelection', titleFormatter: 'rowSelection', hozAlign: 'center', headerSort: false, width: 40, frozen: true });
     }
     cols.push(
@@ -327,12 +340,12 @@ export default function DailyCheckPage() {
       { title: '비고', field: 'dBigo', width: 160, editable: () => canEdit, editor: canEdit ? 'input' : false, visible: !tabletMode },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayWindow, tabletMode, editMode, permission.canUpdate, openUploadPicker, gridWidth]);
+  }, [dayWindow, tabletMode, permission.canUpdate, permission.canDelete, openUploadPicker, gridWidth]);
 
-  // 편집 모드가 꺼져 있거나 권한이 없을 때의 이중 안전장치 — Tabulator가 생성하는 에디터 DOM을
-  // 즉시 제거한다. (1차 방어는 위 컬럼의 editable 콜백 — 이건 만일을 대비한 보조 장치)
+  // 수정 권한이 없을 때의 이중 안전장치 — Tabulator가 생성하는 에디터 DOM을 즉시 제거한다.
+  // (1차 방어는 위 컬럼의 editable 콜백 — 이건 만일을 대비한 보조 장치)
   useEffect(() => {
-    const allowed = editMode && permission.canUpdate;
+    const allowed = permission.canUpdate;
     if (allowed || permission.loading) return undefined;
     const blockEdit = (e) => {
       const cell = e.target.closest?.('.tabulator-cell');
@@ -359,7 +372,7 @@ export default function DailyCheckPage() {
       document.removeEventListener('keydown', blockEdit, true);
       observer.disconnect();
     };
-  }, [editMode, permission.canUpdate, permission.loading]);
+  }, [permission.canUpdate, permission.loading]);
 
   const options = useMemo(
     () => ({
@@ -401,15 +414,15 @@ export default function DailyCheckPage() {
       <div className="mes-card mes-card-fill">
         <div className="mes-toolbar">
           <input type="month" className="mes-field-inline" value={ymInput} onChange={(e) => setYmInput(e.target.value)} />
-          <button className="mes-btn mes-btn-secondary" onClick={() => setYm(ymInput)}>
-            <IconSearch size={15} /> 조회
-          </button>
           <button
-            className={editMode ? 'mes-btn mes-btn-primary' : 'mes-btn mes-btn-secondary'}
-            disabled={!permission.canUpdate}
-            onClick={() => setEditMode((v) => !v)}
+            className="mes-btn mes-btn-secondary"
+            onClick={() => {
+              setYm(ymInput);
+              // ymInput이 현재 ym과 같으면 setYm만으로는 재조회 effect가 안 돌아서 명시적으로 같이 호출한다.
+              fetchList(ymInput);
+            }}
           >
-            <IconEdit size={15} /> {editMode ? '편집 중' : '편집'}
+            <IconSearch size={15} /> 조회
           </button>
           <button
             className={tabletMode ? 'mes-btn mes-btn-primary' : 'mes-btn mes-btn-secondary'}
@@ -453,7 +466,7 @@ export default function DailyCheckPage() {
           >
             <IconPlus size={15} /> 행추가
           </button>
-          <button className="mes-btn mes-btn-secondary" disabled={!editMode || !permission.canDelete} onClick={handleDeleteSelected}>
+          <button className="mes-btn mes-btn-secondary" disabled={!permission.canDelete} onClick={handleDeleteSelected}>
             <IconTrash size={15} /> 행삭제
           </button>
           <button className="mes-btn mes-btn-secondary" onClick={handleExportExcel}>

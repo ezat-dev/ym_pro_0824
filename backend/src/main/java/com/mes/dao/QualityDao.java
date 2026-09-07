@@ -26,9 +26,19 @@ public interface QualityDao {
 
     long selectFproofCount(String keyword);
 
-    List<TempUniform> selectTempUniformList(int offset, int size, String keyword);
+    List<TempUniform> selectTempUniformList(String equipName, String judgment, String from, String to);
 
-    long selectTempUniformCount(String keyword);
+    List<String> selectTempUniformEquipNames();
+
+    TempUniform selectTempUniformById(Long id);
+
+    void insertTempUniform(TempUniform tempUniform);
+
+    void updateTempUniform(TempUniform tempUniform);
+
+    void updateTempUniformFile(Long id, String fileName, String origFileName, long fileSize);
+
+    void softDeleteTempUniform(Long id);
 
     List<Hardness> selectHardnessList(int offset, int size, String keyword);
 

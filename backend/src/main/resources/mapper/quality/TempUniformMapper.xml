@@ -4,26 +4,78 @@
 
     <!-- 품질관리 > 온도균일성보고서 (quality_temp_uniform) -->
 
-    <select id="selectList" parameterType="map" resultType="com.mes.domain.quality.TempUniform">
-        SELECT id, use_yn, reg_dt, upd_dt
-        FROM quality_temp_uniform
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
-        ORDER BY id DESC
-        LIMIT #{size} OFFSET #{offset}
+    <resultMap id="tempUniformMap" type="com.mes.domain.quality.TempUniform">
+        <id property="id" column="id" />
+        <result property="equipName" column="equip_name" />
+        <result property="surveyDate" column="survey_date" />
+        <result property="setTemp" column="set_temp" />
+        <result property="maxTemp" column="max_temp" />
+        <result property="minTemp" column="min_temp" />
+        <result property="tolerance" column="tolerance" />
+        <result property="deviation" column="deviation" />
+        <result property="judgment" column="judgment" />
+        <result property="inspector" column="inspector" />
+        <result property="remark" column="remark" />
+        <result property="fileName" column="file_name" />
+        <result property="origFileName" column="orig_file_name" />
+        <result property="fileSize" column="file_size" />
+        <result property="regUserName" column="reg_user_name" />
+        <result property="useYn" column="use_yn" />
+        <result property="regDt" column="reg_dt" />
+        <result property="updDt" column="upd_dt" />
+    </resultMap>
+
+    <select id="selectList" parameterType="map" resultMap="tempUniformMap">
+        SELECT * FROM quality_temp_uniform
+        WHERE use_yn = 'Y'
+        <if test="from != null and from != ''">AND survey_date &gt;= #{from}</if>
+        <if test="to != null and to != ''">AND survey_date &lt;= #{to}</if>
+        <if test="equipName != null and equipName != ''">AND equip_name = #{equipName}</if>
+        <if test="judgment != null and judgment != ''">AND judgment = #{judgment}</if>
+        ORDER BY survey_date DESC, id DESC
     </select>
 
-    <select id="selectCount" parameterType="map" resultType="long">
-        SELECT COUNT(*)
-        FROM quality_temp_uniform
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND id LIKE CONCAT('%', #{keyword}, '%')
-            </if>
-        </where>
+    <select id="selectEquipNames" resultType="string">
+        SELECT DISTINCT equip_name FROM quality_temp_uniform WHERE use_yn = 'Y' AND equip_name != '' ORDER BY equip_name
     </select>
+
+    <select id="selectById" parameterType="long" resultMap="tempUniformMap">
+        SELECT * FROM quality_temp_uniform WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.mes.domain.quality.TempUniform" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO quality_temp_uniform
+            (equip_name, survey_date, set_temp, max_temp, min_temp, tolerance, deviation, judgment,
+             inspector, remark, reg_user_name)
+        VALUES
+            (#{equipName}, #{surveyDate}, #{setTemp}, #{maxTemp}, #{minTemp}, #{tolerance}, #{deviation}, #{judgment},
+             #{inspector}, #{remark}, #{regUserName})
+    </insert>
+
+    <update id="updateMeta" parameterType="com.mes.domain.quality.TempUniform">
+        UPDATE quality_temp_uniform
+        SET equip_name = #{equipName},
+            survey_date = #{surveyDate},
+            set_temp = #{setTemp},
+            max_temp = #{maxTemp},
+            min_temp = #{minTemp},
+            tolerance = #{tolerance},
+            deviation = #{deviation},
+            judgment = #{judgment},
+            inspector = #{inspector},
+            remark = #{remark},
+            upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateFile">
+        UPDATE quality_temp_uniform
+        SET file_name = #{fileName}, orig_file_name = #{origFileName}, file_size = #{fileSize}, upd_dt = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="softDelete" parameterType="long">
+        UPDATE quality_temp_uniform SET use_yn = 'N', upd_dt = NOW() WHERE id = #{id}
+    </update>
 
 </mapper>

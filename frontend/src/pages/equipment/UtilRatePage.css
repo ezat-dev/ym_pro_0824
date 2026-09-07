@@ -1,0 +1,502 @@
+/* 설비관리 > 설비가동률분석 — UI 목업(실데이터 연동 전). 설비 6대(BCF1~6)의 가동률을
+   도넛 게이지 6개 + 랭킹 막대그래프 + 구성비 도넛 + 7일 추이 그래프로 화려하게 보여준다. */
+
+.ur-page-icon {
+  background: linear-gradient(135deg, #60a5fa 0%, #4338ca 100%);
+  box-shadow: 0 6px 16px -4px rgba(67, 56, 202, 0.45);
+}
+
+.mes-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ur-mock-badge {
+  flex-shrink: 0;
+  margin-top: 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: var(--mes-text-faint);
+  border: 1.5px dashed var(--mes-border);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+.ur-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 2px;
+}
+
+.ur-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--mes-text);
+  letter-spacing: -0.1px;
+  margin-bottom: 12px;
+}
+
+.ur-section-title svg {
+  color: var(--mes-accent);
+}
+
+/* ── 히어로 영역 ── */
+
+.ur-hero-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ur-hero-donut-card {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 26px 20px 22px;
+  background: linear-gradient(180deg, #fbfcfe 0%, var(--mes-surface) 100%);
+}
+
+.ur-hero-donut-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  height: 220px;
+}
+
+.ur-hero-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ur-hero-donut-value {
+  font-size: 40px;
+  font-weight: 800;
+  font-family: Consolas, monospace;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.ur-hero-donut-value span {
+  font-size: 19px;
+  margin-left: 1px;
+}
+
+.ur-hero-donut-label {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+}
+
+.ur-hero-target {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--mes-text-sub);
+  text-align: center;
+}
+
+.ur-hero-target b {
+  font-weight: 800;
+}
+
+.ur-kpi-grid {
+  flex: 1;
+  min-width: 340px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.ur-kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 20px;
+}
+
+.ur-kpi-icon {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.ur-kpi-icon-gold { background: linear-gradient(135deg, #f6cd6b 0%, #b7791f 100%); }
+.ur-kpi-icon-danger { background: linear-gradient(135deg, #f2867c 0%, #c0392b 100%); }
+.ur-kpi-icon-accent { background: var(--mes-accent-grad); }
+.ur-kpi-icon-purple { background: linear-gradient(135deg, #b794f4 0%, #6b46c1 100%); }
+
+.ur-kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ur-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+}
+
+.ur-kpi-value {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--mes-text);
+  font-family: Consolas, monospace;
+  letter-spacing: -0.3px;
+}
+
+.ur-kpi-value em {
+  font-style: normal;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  margin-left: 3px;
+}
+
+/* ── 설비별 게이지 카드 ── */
+
+.ur-gauge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.ur-gauge-card {
+  padding: 18px 18px 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.ur-gauge-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--ur-accent);
+}
+
+.ur-gauge-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ur-gauge-code {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: Consolas, monospace;
+}
+
+.ur-gauge-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mes-text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ur-health-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+
+.ur-health-good { background: var(--mes-success-soft); color: var(--mes-success); }
+.ur-health-warn { background: var(--mes-warning-soft); color: var(--mes-warning); }
+.ur-health-bad { background: var(--mes-danger-soft); color: var(--mes-danger); }
+
+.ur-gauge-donut-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 172px;
+  height: 156px;
+  margin: 4px auto 0;
+}
+
+.ur-gauge-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ur-gauge-donut-value {
+  font-size: 26px;
+  font-weight: 800;
+  font-family: Consolas, monospace;
+  line-height: 1;
+}
+
+.ur-gauge-donut-pct {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  margin-top: 3px;
+}
+
+.ur-gauge-foot {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mes-line);
+}
+
+.ur-gauge-foot-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--mes-text-faint);
+}
+
+.ur-gauge-foot-item b {
+  color: var(--mes-text);
+  font-weight: 800;
+  font-family: Consolas, monospace;
+}
+
+.ur-gauge-foot-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── 랭킹 막대그래프 + 구성비 도넛 ── */
+
+.ur-bottom-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ur-rank-card {
+  flex: 1.2;
+  min-width: 380px;
+  padding: 18px 20px;
+}
+
+.ur-rank-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mes-line);
+}
+
+.ur-rank-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--mes-text-faint);
+  font-weight: 600;
+}
+
+.ur-rank-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.ur-rank-legend-target {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.ur-breakdown-card {
+  flex: 1;
+  min-width: 340px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ur-breakdown-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.ur-breakdown-donut-wrap {
+  position: relative;
+  width: 210px;
+  height: 210px;
+  flex-shrink: 0;
+}
+
+.ur-breakdown-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ur-breakdown-donut-value {
+  font-size: 28px;
+  font-weight: 800;
+  font-family: Consolas, monospace;
+  color: var(--mes-text);
+  line-height: 1;
+}
+
+.ur-breakdown-donut-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mes-text-faint);
+  margin-top: 3px;
+}
+
+.ur-breakdown-legend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ur-breakdown-legend-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ur-breakdown-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 2px 5px -1px rgba(16, 24, 40, 0.35);
+}
+
+.ur-breakdown-legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ur-breakdown-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mes-text);
+  white-space: nowrap;
+}
+
+.ur-breakdown-meta {
+  font-size: 12.5px;
+  color: var(--mes-text-faint);
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+}
+
+.ur-breakdown-meta b {
+  font-weight: 800;
+  color: var(--mes-text);
+}
+
+/* ── 추이 그래프 ── */
+
+.ur-trend-card {
+  padding: 18px 20px 12px;
+}
+
+/* ── recharts 커스텀 툴팁 ── */
+
+.ur-chart-tooltip {
+  background: #fff;
+  border: 1px solid var(--mes-border);
+  border-radius: 8px;
+  padding: 8px 11px;
+  box-shadow: var(--mes-shadow-sm);
+  font-size: 11.5px;
+}
+
+.ur-chart-tooltip-title {
+  font-weight: 800;
+  color: var(--mes-text);
+  margin-bottom: 2px;
+}
+
+.ur-chart-tooltip-value {
+  font-weight: 800;
+  font-family: Consolas, monospace;
+  color: var(--mes-accent-dark);
+}
+
+/* ── 도넛/게이지 "실시간" 표시 — 배경 글로우나 링 위에 얹는 별도 점 둘 다 어색해서,
+   대신 링을 채우는 그라디언트 자체를 아주 천천히 회전시킨다(JSX의 <animateTransform>).
+   새 요소 없이 이미 있는 색이 링 안에서 은은하게 흐르는 느낌만 더하는 방식이라 차분하다. ── */
+
+.ur-gauge-chart-layer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 1280px) {
+  .ur-gauge-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ur-gauge-grid {
+    grid-template-columns: 1fr;
+  }
+  .ur-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}

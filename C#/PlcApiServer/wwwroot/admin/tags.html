@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PLC 태그 관리</title>
+<link rel="stylesheet" href="tags.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-title">
+    <span class="topbar-icon">⛭</span>
+    <div>
+      <h1>PLC 태그 관리</h1>
+      <p class="topbar-sub">PLC 연결 · 모니터링 태그 · 온도 태그 · 알람 태그의 정의(이름/주소/PLC)를 관리합니다</p>
+    </div>
+  </div>
+  <nav class="tabnav">
+    <button class="tab-btn" data-tab="plc">🔌 PLC 관리</button>
+    <button class="tab-btn is-active" data-tab="folder">📡 모니터링 태그</button>
+    <button class="tab-btn" data-tab="temp">🌡 온도 태그</button>
+    <button class="tab-btn" data-tab="alarm">🔔 알람 태그</button>
+    <button class="tab-btn" data-tab="monitor">📊 실시간 모니터링</button>
+  </nav>
+</header>
+
+<main class="app">
+
+  <!-- ============================= PLC 관리 (tb_plc) ============================= -->
+  <section id="tab-plc" class="tab-panel">
+    <div class="content">
+      <div class="toolbar">
+        <div class="toolbar-title">PLC 목록 <span class="table-tag">tb_plc</span></div>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="search" class="search-input" id="plcSearch" placeholder="PLC ID · 이름 · IP로 검색">
+        </div>
+        <span class="count-badge" id="plcCount"></span>
+        <div class="toolbar-spacer"></div>
+        <button class="btn btn-primary" id="plcAddBtn">+ 새 PLC</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="plcTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="plcId" style="width:140px">PLC ID</th>
+              <th class="sortable" data-sort="label">이름</th>
+              <th class="sortable" data-sort="ip" style="width:130px">IP</th>
+              <th style="width:80px">포트</th>
+              <th style="width:110px">타입</th>
+              <th style="width:70px">사용</th>
+              <th style="width:140px">관리</th>
+            </tr>
+          </thead>
+          <tbody id="plcBody"></tbody>
+        </table>
+        <div class="empty-state" id="plcEmpty" hidden>PLC가 없습니다. "+ 새 PLC"로 추가하세요.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================= 모니터링 태그 (folders_tags) ============================= -->
+  <section id="tab-folder" class="tab-panel is-active">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span>폴더 <span class="table-tag">folders</span></span>
+        <button class="btn-icon" id="folderAddBtn" title="새 폴더">+ 폴더</button>
+      </div>
+      <ul class="folder-list" id="folderList"></ul>
+    </aside>
+    <div class="content">
+      <div class="toolbar">
+        <div class="toolbar-title" id="folderTagsTitle">전체 모니터링 태그 <span class="table-tag">folders_tags</span></div>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="search" class="search-input" id="folderTagSearch" placeholder="태그이름 · 주소로 검색">
+        </div>
+        <span class="count-badge" id="folderTagCount"></span>
+        <div class="toolbar-spacer"></div>
+        <a class="btn btn-ghost" id="folderTagExportBtn" href="/api/admin/foldertags/export">⬇ 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="folderTagImportBtn">⬆ 엑셀 업로드</button>
+        <input type="file" id="folderTagImportFile" accept=".xlsx" hidden>
+        <button class="btn btn-primary" id="folderTagAddBtn">+ 새 태그</button>
+      </div>
+
+      <details class="docs">
+        <summary>ℹ️ 이 태그, 나중에 어떻게 가져다 쓰나요? (URL 사용법)</summary>
+        <div class="docs-body">
+          <p><strong>동작 방식</strong> — 서버가 2초마다 이 폴더의 모든 태그를 PLC에서 미리 읽어 메모리에 들고 있습니다. 아래 URL을 호출하면 PLC와 통신하지 않고 <em>메모리에 있는 최신값을 즉시</em> 돌려줍니다.</p>
+
+          <p><strong>① 폴더 전체 값 한번에 조회</strong></p>
+          <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/values?folderId=<span id="docFolderId">4</span></pre>
+          <pre class="code-block">{
+  "success": true,
+  "folderId": 4,
+  "lastPollAt": "2026-09-04T05:33:07Z",
+  "tags": [
+    { "name": "name_1", "address": "D100", "value": 50531 }
+  ]
+}</pre>
+
+          <p><strong>② 태그 이름으로 값 하나만 조회</strong> (같은 이름이 여러 폴더에 있으면 배열로 반환)</p>
+          <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/value/by-name?name=태그이름</pre>
+
+          <p><strong>③ PLC 주소로 직접 조회</strong> (태그로 등록 안 돼 있어도 동작)</p>
+          <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/value/by-address?plcId=MST_MITSUBISHI&amp;address=D100</pre>
+
+          <p><strong>④ 값 쓰기</strong> — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작입니다. 신중하게 사용하세요.</p>
+          <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/write/by-name?name=태그이름&amp;value=123</pre>
+
+          <p class="docs-note">위 4개는 이미 서버에 구현되어 있어 지금 바로 호출 가능합니다. 이 관리 화면은 "값"이 아니라 태그 <b>정의</b>(이름/주소/PLC)만 관리합니다.</p>
+        </div>
+      </details>
+
+      <div class="table-wrap">
+        <table class="data-table" id="folderTagTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="id">ID</th>
+              <th class="sortable" data-sort="name">태그 이름</th>
+              <th class="sortable" data-sort="address" style="width:100px">주소</th>
+              <th style="width:100px">폴더</th>
+              <th>PLC</th>
+              <th style="width:80px">타입</th>
+              <th style="width:70px">사용</th>
+              <th style="width:140px">관리</th>
+            </tr>
+          </thead>
+          <tbody id="folderTagBody"></tbody>
+        </table>
+        <div class="empty-state" id="folderTagEmpty" hidden>왼쪽에서 폴더를 먼저 선택하세요.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= 온도 태그 (tb_temp_tag) ============================= -->
+  <section id="tab-temp" class="tab-panel">
+    <aside class="sidebar">
+      <div class="sidebar-head"><span>설비 <span class="table-tag">tb_temp_tag.equip_id</span></span></div>
+      <ul class="folder-list" id="equipList"></ul>
+    </aside>
+    <div class="content">
+      <div class="toolbar">
+        <div class="toolbar-title" id="tempTagsTitle">전체 온도 태그 <span class="table-tag">tb_temp_tag</span></div>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="search" class="search-input" id="tempTagSearch" placeholder="태그이름 · 주소로 검색">
+        </div>
+        <span class="count-badge" id="tempTagCount"></span>
+        <div class="toolbar-spacer"></div>
+        <a class="btn btn-ghost" id="tempTagExportBtn" href="/api/admin/temptags/export">⬇ 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="tempTagImportBtn">⬆ 엑셀 업로드</button>
+        <input type="file" id="tempTagImportFile" accept=".xlsx" hidden>
+        <button class="btn btn-primary" id="tempTagAddBtn">+ 새 태그</button>
+      </div>
+
+      <details class="docs">
+        <summary>ℹ️ 온도 태그를 저장하면 무슨 일이 생기나요? (tb_temp_snapshot 설명)</summary>
+        <div class="docs-body">
+          <p><strong>동작 방식</strong> — 온도 태그 1개 = <code>tb_temp_snapshot</code> 테이블의 컬럼 1개입니다. 태그를 저장하는 즉시 <code>col_name</code> 이름으로 컬럼이 생성되고(이미 있으면 건너뜀), 이후 서버가 <b>30초마다</b> 이 태그가 속한 PLC에서 실제 값을 읽어 <code>scale</code> 보정식을 적용한 뒤 스냅샷 한 행으로 저장합니다. 즉 한 "행"에 그 시각 모든 온도 태그의 값이 컬럼별로 나란히 쌓입니다.</p>
+
+          <table class="mini-table">
+            <thead><tr><th>필드</th><th>의미</th></tr></thead>
+            <tbody>
+              <tr><td>태그 이름</td><td>화면/보고서에 표시할 이름 (예: "No.1 Zone")</td></tr>
+              <tr><td>주소</td><td>PLC 레지스터 주소 (예: D100) — 항상 워드(D) 읽기로 동작</td></tr>
+              <tr><td>컬럼명(col_name)</td><td>tb_temp_snapshot의 실제 컬럼명. 영문/숫자/밑줄만 가능, 저장 시 즉시 컬럼 생성</td></tr>
+              <tr><td>트렌드명</td><td>그래프 범례 등에 쓰는 짧은 표시 이름 (예: "1존")</td></tr>
+              <tr><td>스케일</td><td>보정식. 맨 앞 1글자가 연산자(+,-,*,/), 나머지가 숫자 (예: "+50", "*0.01"). 비워두면 PLC 원시값 그대로 저장</td></tr>
+              <tr><td>설비(equip_id)</td><td>여러 온도 태그를 같은 설비 단위로 묶는 자유 입력 값 (예: "BCF1")</td></tr>
+            </tbody>
+          </table>
+
+          <p><strong>예시</strong> — 태그 이름 "No.1 Zone", 주소 D100, 스케일 "+50" 저장 → PLC에서 읽은 원시값이 120이면 → 120+50 = <b>170.0</b>이 tb_temp_snapshot의 해당 컬럼에 저장됨.</p>
+
+          <p><strong>현재 저장된 실제 컬럼 목록</strong> (tb_temp_snapshot, 실시간 조회)</p>
+          <pre class="code-block" id="snapshotColumnsBox">불러오는 중...</pre>
+
+          <p class="docs-note">⚠️ 컬럼명을 나중에 바꾸면 예전 데이터는 예전 컬럼에 그대로 남고 새 컬럼이 새로 생깁니다(자동 이관 안 함). 태그를 삭제해도 기존 컬럼과 과거 데이터는 보존됩니다(추세 이력 보호).<br>
+          현재 추세 값 조회 전용 API는 없습니다 — DB(<code>tb_temp_snapshot</code>)를 직접 SELECT해서 확인합니다.</p>
+        </div>
+      </details>
+
+      <div class="table-wrap">
+        <table class="data-table" id="tempTagTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="tempId">ID</th>
+              <th class="sortable" data-sort="tagName">태그 이름</th>
+              <th class="sortable" data-sort="address" style="width:100px">주소</th>
+              <th>PLC</th>
+              <th>컬럼명(col_name)</th>
+              <th>트렌드명</th>
+              <th style="width:90px">스케일</th>
+              <th class="sortable" data-sort="equipId" style="width:90px">설비</th>
+              <th style="width:70px">사용</th>
+              <th style="width:140px">관리</th>
+            </tr>
+          </thead>
+          <tbody id="tempTagBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= 알람 태그 (tb_alarm_tag) ============================= -->
+  <section id="tab-alarm" class="tab-panel">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span>알람 폴더 <span class="table-tag">tb_alarm_folder</span></span>
+        <button class="btn-icon" id="alarmFolderAddBtn" title="새 폴더">+ 폴더</button>
+      </div>
+      <ul class="folder-list" id="alarmFolderList"></ul>
+    </aside>
+    <div class="content">
+      <div class="toolbar">
+        <div class="toolbar-title" id="alarmTagsTitle">전체 알람 태그 <span class="table-tag">tb_alarm_tag</span></div>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="search" class="search-input" id="alarmTagSearch" placeholder="태그이름 · 주소 · 알람메시지로 검색">
+        </div>
+        <span class="count-badge" id="alarmTagCount"></span>
+        <div class="toolbar-spacer"></div>
+        <a class="btn btn-ghost" id="alarmTagExportBtn" href="/api/admin/alarmtags/export">⬇ 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="alarmTagImportBtn">⬆ 엑셀 업로드</button>
+        <input type="file" id="alarmTagImportFile" accept=".xlsx" hidden>
+        <button class="btn btn-primary" id="alarmTagAddBtn">+ 새 태그</button>
+      </div>
+
+      <details class="docs">
+        <summary>ℹ️ 알람 태그는 어떻게 동작하나요?</summary>
+        <div class="docs-body">
+          <p><strong>동작 방식</strong> — 서버가 2초마다 이 태그의 PLC 주소를 읽어, 값이 <b>OFF→ON 또는 ON→OFF로 전환되는 순간에만</b> <code>tb_alarm_history</code> 테이블에 이력을 1건 기록합니다(값이 그대로 유지되는 동안은 기록하지 않음). 레벨은 알람 심각도를 화면에서 구분하기 위한 숫자입니다(값이 클수록 심각하다는 식의 규칙은 이 화면을 쓰는 쪽에서 정하면 됩니다).</p>
+          <p class="docs-note">⚠️ 현재 알람의 실시간 상태나 이력을 바로 조회하는 URL API는 아직 없습니다 — 필요하시면 <code>tb_alarm_history</code> 테이블을 직접 조회하거나, 별도로 조회 API 추가를 요청해주세요. 이 화면은 태그 <b>정의</b>(이름/주소/메시지)만 관리합니다.</p>
+        </div>
+      </details>
+
+      <div class="table-wrap">
+        <table class="data-table" id="alarmTagTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="tagId">ID</th>
+              <th class="sortable" data-sort="tagName">태그 이름</th>
+              <th class="sortable" data-sort="address" style="width:100px">주소</th>
+              <th style="width:100px">폴더</th>
+              <th>PLC</th>
+              <th>알람 메시지</th>
+              <th class="sortable" data-sort="level" style="width:70px">레벨</th>
+              <th style="width:70px">사용</th>
+              <th style="width:140px">관리</th>
+            </tr>
+          </thead>
+          <tbody id="alarmTagBody"></tbody>
+        </table>
+        <div class="empty-state" id="alarmTagEmpty" hidden>왼쪽에서 알람 폴더를 먼저 선택하세요.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= 실시간 모니터링 (PLC 재요청 없이 메모리/최근 스냅샷만 표시) ============================= -->
+  <section id="tab-monitor" class="tab-panel">
+    <div class="content">
+      <nav class="subtabnav">
+        <button class="subtab-btn is-active" data-subtab="mon-folder">📡 모니터링 태그</button>
+        <button class="subtab-btn" data-subtab="mon-alarm">🔔 알람 태그</button>
+        <button class="subtab-btn" data-subtab="mon-temp">🌡 온도 트렌드</button>
+      </nav>
+
+      <!-- 모니터링 태그 현재값 -->
+      <div id="submon-folder" class="subtab-panel is-active">
+        <div class="toolbar">
+          <div class="toolbar-title">실시간 값 <span class="table-tag">메모리(FolderTagValues)</span></div>
+          <select id="monFolderSelect" class="filter-select"><option value="ALL">전체 폴더</option></select>
+          <span class="count-badge" id="monFolderCount"></span>
+          <div class="toolbar-spacer"></div>
+          <span class="live-indicator"><span class="live-dot"></span><span id="monFolderUpdatedAt">-</span></span>
+        </div>
+        <div class="monitor-split">
+          <div class="table-wrap monitor-split-table">
+            <table class="data-table">
+              <thead><tr><th style="width:56px">ID</th><th>태그 이름</th><th style="width:110px">주소</th><th style="width:120px">폴더</th><th style="width:140px">값</th></tr></thead>
+              <tbody id="monFolderBody"></tbody>
+            </table>
+            <div class="empty-state" id="monFolderEmpty" hidden>표시할 태그가 없습니다.</div>
+          </div>
+
+          <div class="write-panel" id="writePanel">
+            <div class="write-panel-head">📝 값 쓰기</div>
+            <div id="writePanelEmpty" class="write-panel-empty">왼쪽 표에서 태그 행을 클릭해 선택하세요 (Shift·Ctrl로 다중선택)</div>
+            <form id="writePanelForm" hidden>
+              <div class="write-sel-count" id="writeSelCount">-</div>
+              <div class="write-sel-list" id="writeSelList"></div>
+              <div class="write-value-row">
+                <input type="number" id="writeValueInput" required step="1" placeholder="새 값">
+                <button type="submit" class="btn btn-primary" id="writeSubmitBtn">쓰기</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- 알람 태그 현재 상태 -->
+      <div id="submon-alarm" class="subtab-panel">
+        <div class="toolbar">
+          <div class="toolbar-title">실시간 상태 <span class="table-tag">메모리(AlarmTagValues)</span></div>
+          <select id="monAlarmFolderSelect" class="filter-select"><option value="ALL">전체 폴더</option></select>
+          <span class="count-badge" id="monAlarmCount"></span>
+          <span class="alarm-sel-ctrl">
+            <span class="count-badge" id="alarmSelCount">선택 없음</span>
+            <button type="button" class="btn btn-sm alarm-batch-on" id="alarmBatchOnBtn" disabled>ON 쓰기</button>
+            <button type="button" class="btn btn-sm alarm-batch-off" id="alarmBatchOffBtn" disabled>OFF 쓰기</button>
+          </span>
+          <div class="toolbar-spacer"></div>
+          <span class="live-indicator"><span class="live-dot"></span><span id="monAlarmUpdatedAt">-</span></span>
+        </div>
+        <div class="alarm-grid" id="monAlarmGrid"></div>
+        <div class="empty-state" id="monAlarmEmpty" hidden>표시할 태그가 없습니다.</div>
+      </div>
+
+      <!-- 온도 태그 트렌드 -->
+      <div id="submon-temp" class="subtab-panel">
+        <div class="toolbar">
+          <div class="toolbar-title">온도 트렌드 <span class="table-tag">tb_temp_snapshot 최근 60분</span></div>
+          <select id="monTempEquipSelect" class="filter-select"><option value="">전체 설비</option></select>
+          <span class="count-badge" id="monTempCount"></span>
+          <button type="button" class="btn btn-ghost" id="monTempRefreshBtn">🔄 새로고침</button>
+          <div class="toolbar-spacer"></div>
+          <span class="live-indicator"><span class="live-dot"></span><span id="monTempUpdatedAt">-</span></span>
+        </div>
+        <div class="trend-grid" id="monTempGrid"></div>
+        <div class="empty-state" id="monTempEmpty" hidden>표시할 온도 태그가 없습니다.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================= PLC 추가/수정 모달 ============================= -->
+<div class="modal-backdrop" id="plcModalBackdrop" hidden>
+  <div class="modal">
+    <h2 id="plcModalTitle">새 PLC</h2>
+    <form id="plcForm">
+      <label>PLC ID <input type="text" id="plcIdInput" required maxlength="50" placeholder="예: MST_MITSUBISHI"></label>
+      <p class="field-hint" id="plcIdHint">※ 다른 태그들이 이 값으로 PLC를 참조합니다. 저장 후에는 바꿀 수 없습니다.</p>
+      <label>이름(label) <input type="text" id="plcLabelInput" required maxlength="100" placeholder="예: 미쓰마스터PLC"></label>
+      <label>IP <input type="text" id="plcIpInput" required maxlength="50" placeholder="예: 192.168.1.50"></label>
+      <label>타입 <select id="plcTypeSelect">
+        <option value="LS">LS (FEnet)</option>
+        <option value="MITSUBISHI">MITSUBISHI (MC Protocol)</option>
+        <option value="MODBUS_TCP">MODBUS_TCP</option>
+      </select></label>
+      <label>포트 <input type="number" id="plcPortInput" required min="1" max="65535" value="2004"></label>
+      <label class="checkbox-label"><input type="checkbox" id="plcEnabledInput" checked> 사용함</label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="plcModalBackdrop">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================= 폴더 추가/수정 모달 (모니터링·알람 태그 공용) ============================= -->
+<div class="modal-backdrop" id="folderModalBackdrop" hidden>
+  <div class="modal">
+    <h2 id="folderModalTitle">새 폴더</h2>
+    <form id="folderForm">
+      <label>폴더 이름 <input type="text" id="folderNameInput" required maxlength="100"></label>
+      <label>상위 폴더 <select id="folderParentSelect"><option value="">(최상위)</option></select></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="folderModalBackdrop">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================= 모니터링 태그 추가/수정 모달 ============================= -->
+<div class="modal-backdrop" id="folderTagModalBackdrop" hidden>
+  <div class="modal">
+    <h2 id="folderTagModalTitle">새 모니터링 태그</h2>
+    <form id="folderTagForm">
+      <label>폴더 <select id="ftFolderSelect" required></select></label>
+      <label>태그 이름 <input type="text" id="ftNameInput" required maxlength="200"></label>
+      <label>주소 <input type="text" id="ftAddressInput" required maxlength="50" placeholder="예: D100, M100, X04A"></label>
+      <label>PLC <select id="ftPlcSelect" required></select></label>
+      <label>타입 <select id="ftTypeSelect">
+        <option value="WORD">WORD</option>
+        <option value="BIT">BIT</option>
+      </select></label>
+      <p class="field-hint">※ 실제 비트/워드 판단은 주소 앞글자(D=워드, M/X/Y=비트 등)로 자동 처리되며, 이 값은 참고용입니다.</p>
+      <label class="checkbox-label"><input type="checkbox" id="ftEnabledInput" checked> 사용함</label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="folderTagModalBackdrop">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================= 온도 태그 추가/수정 모달 ============================= -->
+<div class="modal-backdrop" id="tempTagModalBackdrop" hidden>
+  <div class="modal">
+    <h2 id="tempTagModalTitle">새 온도 태그</h2>
+    <form id="tempTagForm">
+      <label>태그 이름 <input type="text" id="ttNameInput" required maxlength="100"></label>
+      <label>주소 <input type="text" id="ttAddressInput" required maxlength="50" placeholder="예: D100"></label>
+      <label>PLC <select id="ttPlcSelect" required></select></label>
+      <label>컬럼명(col_name) <input type="text" id="ttColNameInput" required maxlength="64" pattern="[A-Za-z0-9_]+" placeholder="예: zone1_temp"></label>
+      <p class="field-hint">※ 영문/숫자/밑줄(_)만 가능. tb_temp_snapshot에 이 이름으로 컬럼이 생성됩니다.</p>
+      <label>트렌드명 <input type="text" id="ttTrendNameInput" maxlength="120" placeholder="비우면 태그 이름 사용"></label>
+      <label>스케일 <input type="text" id="ttScaleInput" maxlength="20" placeholder="예: +50, *0.01 (비우면 원시값 그대로)"></label>
+      <label>설비(equip_id) <input type="text" id="ttEquipIdInput" list="equipIdList" maxlength="20" placeholder="예: BCF1"></label>
+      <datalist id="equipIdList"></datalist>
+      <label class="checkbox-label"><input type="checkbox" id="ttEnabledInput" checked> 사용함</label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="tempTagModalBackdrop">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================= 알람 태그 추가/수정 모달 ============================= -->
+<div class="modal-backdrop" id="alarmTagModalBackdrop" hidden>
+  <div class="modal">
+    <h2 id="alarmTagModalTitle">새 알람 태그</h2>
+    <form id="alarmTagForm">
+      <label>폴더 <select id="atFolderSelect" required></select></label>
+      <label>태그 이름 <input type="text" id="atNameInput" required maxlength="100"></label>
+      <label>주소 <input type="text" id="atAddressInput" required maxlength="50" placeholder="예: M100"></label>
+      <label>PLC <select id="atPlcSelect" required></select></label>
+      <label>알람 메시지 <input type="text" id="atMsgInput" required maxlength="255" placeholder="예: 온도 이상 감지"></label>
+      <label>레벨 <input type="number" id="atLevelInput" min="1" max="5" value="1"></label>
+      <label class="checkbox-label"><input type="checkbox" id="atEnabledInput" checked> 사용함</label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-modal="alarmTagModalBackdrop">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================= 엑셀 업로드 결과 모달 ============================= -->
+<div class="modal-backdrop" id="importResultBackdrop" hidden>
+  <div class="modal">
+    <h2>엑셀 업로드 결과</h2>
+    <div id="importResultBody" class="import-result"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" data-close-modal="importResultBackdrop">확인</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 온도 트렌드 차트 — CDN 없이 로컬에 내려받아 둔 파일(공장 PC라 인터넷이 항상 되리라는 보장이 없음) -->
+<script src="vendor/chart.umd.min.js"></script>
+<script src="tags.js"></script>
+</body>
+</html>

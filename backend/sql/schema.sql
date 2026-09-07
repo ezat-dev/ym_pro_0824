@@ -86,13 +86,30 @@ DELIMITER ;
 CALL sp_add_daily_check_value_type_column();
 DROP PROCEDURE sp_add_daily_check_value_type_column;
 
--- 특정 월에 데이터가 없으면 고정 점검 항목 15개를 자동으로 채워 넣는 프로시저.
--- (항목/타입은 임시 예시 — 화면의 행 추가/수정/삭제, 타입 배지 클릭으로 언제든 바꿀 수 있다.)
+-- 특정 월에 데이터가 없으면 자동으로 채워 넣는 프로시저.
+-- 직전에 데이터가 있던 달이 있으면 그 달의 항목 구성(제목/설명/타입만, 값은 공란)을 그대로 이어받고,
+-- 그런 달이 전혀 없을 때(최초 설치 시점)에만 고정 예시 15개로 시작한다.
+-- (이전 버전은 매번 이 고정 15개로만 채워서, 어느 한 달에서 항목을 커스터마이징해도 다음 달엔
+--  반영되지 않는 문제가 있었다 — 사용자가 9월에 항목을 추가/수정해도 10월엔 안 보인다고 확인.)
 DROP PROCEDURE IF EXISTS sp_seed_condition_daily_check;
 DELIMITER $$
 CREATE PROCEDURE sp_seed_condition_daily_check(IN p_ym VARCHAR(10))
 BEGIN
+    DECLARE v_prev_ym VARCHAR(10);
     IF (SELECT COUNT(*) FROM condition_daily_check WHERE d_ym = p_ym) = 0 THEN
+        SELECT d_ym INTO v_prev_ym
+        FROM condition_daily_check
+        WHERE d_ym < p_ym AND use_yn = 'Y'
+        ORDER BY d_ym DESC
+        LIMIT 1;
+
+        IF v_prev_ym IS NOT NULL THEN
+            INSERT INTO condition_daily_check (d_title, d_desc, d_ym, value_type)
+            SELECT d_title, d_desc, p_ym, value_type
+            FROM condition_daily_check
+            WHERE d_ym = v_prev_ym AND use_yn = 'Y'
+            ORDER BY cnt ASC;
+        ELSE
         INSERT INTO condition_daily_check (d_title, d_desc, d_ym, value_type) VALUES
             ('설비 외관 상태 확인', '', p_ym, 'check'),
             ('공기압(에어) 확인', '', p_ym, 'number'),
@@ -109,6 +126,7 @@ BEGIN
             ('안전장치(리밋스위치 등) 작동 확인', '', p_ym, 'check'),
             ('누유/누수 여부 확인', '', p_ym, 'check'),
             ('소음/진동 이상 여부 확인', '', p_ym, 'text');
+        END IF;
     END IF;
 END$$
 DELIMITER ;
@@ -205,6 +223,32 @@ CREATE TABLE IF NOT EXISTS condition_oil_analysis (
     reg_dt               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     upd_dt               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_condition_oil_analysis_mch_date (mch_name, cr_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 품질관리 > 온도균일성보고서: 로(furnace) 유효작업구역 온도균일성조사(TUS) 기록.
+-- 편차/판정은 클라이언트가 보낸 값을 믿지 않고 설정온도·최고/최저 실측값·허용오차로 서버가 매번 다시
+-- 계산해서 저장한다(조절계 관리의 deviation 계산과 동일한 원칙 — 판정을 수동 드롭다운으로 두면 실측값과
+-- 어긋날 수 있어서).
+CREATE TABLE IF NOT EXISTS quality_temp_uniform (
+    id                INT AUTO_INCREMENT PRIMARY KEY,
+    equip_name        VARCHAR(100) NOT NULL DEFAULT '',   -- 설비명
+    survey_date       VARCHAR(10)  NOT NULL DEFAULT '',   -- 조사일자 (YYYY-MM-DD)
+    set_temp          DECIMAL(6,1) NOT NULL DEFAULT 0,    -- 설정온도(℃)
+    max_temp          DECIMAL(6,1) NOT NULL DEFAULT 0,    -- 최고 측정값(℃)
+    min_temp          DECIMAL(6,1) NOT NULL DEFAULT 0,    -- 최저 측정값(℃)
+    tolerance         DECIMAL(6,1) NOT NULL DEFAULT 10,   -- 허용오차(±℃)
+    deviation         DECIMAL(6,1) NOT NULL DEFAULT 0,    -- 계산값: max(|max-set|, |min-set|)
+    judgment          VARCHAR(10)  NOT NULL DEFAULT '',   -- 계산값: 합격 | 불합격
+    inspector         VARCHAR(50)  NOT NULL DEFAULT '',   -- 검사자
+    remark            VARCHAR(300) NOT NULL DEFAULT '',
+    file_name         VARCHAR(255) NOT NULL DEFAULT '',   -- 성적서 PDF
+    orig_file_name    VARCHAR(255) NOT NULL DEFAULT '',
+    file_size         BIGINT       NOT NULL DEFAULT 0,
+    reg_user_name     VARCHAR(50)  NOT NULL DEFAULT '',
+    use_yn            CHAR(1) NOT NULL DEFAULT 'Y',
+    reg_dt            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    upd_dt            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_quality_temp_uniform_equip_date (equip_name, survey_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 설비관리 > SPARE 부품관리: 설비별 스페어부품 마스터. 현재고/재고상태는 저장 컬럼이 아니라
