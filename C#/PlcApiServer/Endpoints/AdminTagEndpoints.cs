@@ -18,6 +18,9 @@
 //   파일 자체를 응답 바디로 내려준다(Results.File).
 // ============================================================================
 
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using MySqlConnector;
@@ -138,6 +141,162 @@ SELECT record_time, {selectCols} FROM tb_temp_snapshot
             }
             catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
         });
+
+        // GET /api/admin/monitor/taglog?limit=50 — 값 쓰기 이력(tb_tag_log) 최근 N건.
+        // 모니터링 태그 값쓰기 패널이 빈 공간을 채우는 용도로 쓴다. 쓰기 자체가 없었으면 빈 배열.
+        app.MapGet("/api/admin/monitor/taglog", async (int? limit, PlcRepository repo) =>
+        {
+            try
+            {
+                int take = Math.Clamp(limit ?? 50, 1, 500);
+                var logs = new List<object>();
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                using (var cmd = new MySqlCommand(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='tb_tag_log'", conn))
+                {
+                    if (Convert.ToInt64(await cmd.ExecuteScalarAsync()) == 0)
+                        return Results.Ok(new { success = true, logs = Array.Empty<object>() }); // 아직 한 번도 안 써봄
+                }
+                using var sel = new MySqlCommand(@"
+SELECT log_id, tag_type, tag_id, tag_name, address, plc_id, old_value, new_value, written_at
+  FROM tb_tag_log ORDER BY written_at DESC, log_id DESC LIMIT @take", conn);
+                sel.Parameters.AddWithValue("@take", take);
+                using var rd = await sel.ExecuteReaderAsync();
+                while (await rd.ReadAsync())
+                {
+                    logs.Add(new
+                    {
+                        logId = rd.GetInt64(0),
+                        tagType = rd.GetString(1),
+                        tagId = rd.IsDBNull(2) ? (int?)null : rd.GetInt32(2),
+                        tagName = rd.IsDBNull(3) ? null : rd.GetString(3),
+                        address = rd.GetString(4),
+                        plcId = rd.GetString(5),
+                        oldValue = rd.IsDBNull(6) ? (int?)null : rd.GetInt32(6),
+                        newValue = rd.GetInt32(7),
+                        writtenAt = rd.GetDateTime(8)
+                    });
+                }
+                return Results.Ok(new { success = true, logs });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/monitor/pollstatus — PLC 관리 화면 우측 패널용. 백그라운드 폴링 두 서비스
+        // (LiveTagMonitorService=알람+폴더 통합, TempMonitorService=온도)가 지금 PLC별로 어떻게
+        // 묶여서 도는지, 한 사이클에 실제 몇 ms 걸리는지, 최근 실패가 있었는지를 그대로 보여준다.
+        // PLC를 새로 두드리지 않는다 — 두 서비스가 이미 들고 있는 값만 꺼낸다.
+        app.MapGet("/api/admin/monitor/pollstatus", (LiveTagMonitorService liveMonitor, TempMonitorService tempMonitor) =>
+        {
+            var liveFailures = liveMonitor.RecentFailures.Select(f => new
+            {
+                at = f.At, source = "알람/폴더", plcId = f.PlcId, device = f.Device, message = f.Message
+            });
+            var tempFailures = tempMonitor.RecentFailures.Select(f => new
+            {
+                at = f.At, source = "온도", plcId = f.PlcId, device = f.Device, message = f.Message
+            });
+            var failures = liveFailures.Concat(tempFailures).OrderByDescending(f => f.at).Take(30);
+
+            return Results.Ok(new
+            {
+                success = true,
+                live = new
+                {
+                    intervalMs = liveMonitor.IntervalMs,
+                    lastCycleDurationMs = liveMonitor.LastCycleDurationMs,
+                    lastPollAt = liveMonitor.LastPollAt,
+                    groups = liveMonitor.GetPollGroups(),
+                    durationHistory = liveMonitor.DurationHistory.Select(h => new { at = h.At, ms = h.DurationMs })
+                },
+                temp = new
+                {
+                    intervalMs = tempMonitor.IntervalMs,
+                    lastCycleDurationMs = tempMonitor.LastCycleDurationMs,
+                    lastPollAt = tempMonitor.LastPollAt,
+                    tagCount = tempMonitor.LastTagCount,
+                    durationHistory = tempMonitor.DurationHistory.Select(h => new { at = h.At, ms = h.DurationMs })
+                },
+                failures
+            });
+        });
+
+        // POST /api/admin/monitor/ai-diagnosis  body: pollstatus가 이미 내려준 { live, temp, failures } 그대로
+        //   PLC를 새로 두드리거나 DB를 새로 조회하지 않는다 — 프론트가 이미 가지고 있는 상태 요약을
+        //   그대로 받아서 로컬 Ollama(같은 PC, http://localhost:11434)에게 "지금 상황을 설명해달라"고
+        //   물어본 결과만 돌려준다. Ollama가 안 켜져 있거나 느리면 success:false로 응답한다.
+        app.MapPost("/api/admin/monitor/ai-diagnosis", async (HttpRequest req) =>
+        {
+            try
+            {
+                using var reader = new StreamReader(req.Body);
+                string body = await reader.ReadToEndAsync();
+                using var doc = JsonDocument.Parse(body);
+
+                string prompt = BuildDiagnosisPrompt(doc.RootElement);
+
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+                var ollamaReq = new { model = "qwen2.5:3b", prompt, stream = false };
+                var resp = await http.PostAsJsonAsync("http://localhost:11434/api/generate", ollamaReq);
+                if (!resp.IsSuccessStatusCode)
+                    return Results.Ok(new { success = false, error = $"Ollama 응답 오류: {resp.StatusCode}" });
+
+                var ollamaJson = await resp.Content.ReadFromJsonAsync<JsonElement>();
+                string analysis = ollamaJson.TryGetProperty("response", out var respProp) ? (respProp.GetString() ?? "") : "";
+                return Results.Ok(new { success = true, analysis = analysis.Trim() });
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Ok(new { success = false, error = $"Ollama에 연결할 수 없습니다(로컬에서 실행 중인지 확인하세요): {ex.Message}" });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+    }
+
+    // pollstatus 응답(JSON)을 그대로 받아 Ollama에게 물어볼 한국어 프롬프트로 조립한다.
+    // 실패 로그는 프롬프트가 너무 길어지지 않도록 최근 15건까지만 포함한다.
+    private static string BuildDiagnosisPrompt(JsonElement root)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("당신은 공장 PLC 통신 모니터링 시스템의 진단 도우미입니다. 아래 현재 상태를 보고 한국어로, " +
+                       "5줄 이내로 짧고 실용적으로 현재 상황·원인 추정·조치 방법을 설명해주세요.");
+        sb.AppendLine();
+
+        if (root.TryGetProperty("live", out var live))
+        {
+            sb.AppendLine($"[알람+폴더 태그 폴링] 주기 {live.GetProperty("intervalMs").GetInt32()}ms, " +
+                           $"최근 한 바퀴 소요시간 {live.GetProperty("lastCycleDurationMs").GetInt64()}ms");
+            if (live.TryGetProperty("groups", out var groups))
+                foreach (var g in groups.EnumerateArray())
+                    sb.AppendLine($"  - {g.GetProperty("plcLabel").GetString()}({g.GetProperty("plcId").GetString()}): " +
+                                  $"폴더 {g.GetProperty("folderTagCount").GetInt32()}개, 알람 {g.GetProperty("alarmTagCount").GetInt32()}개");
+        }
+        if (root.TryGetProperty("temp", out var temp))
+        {
+            sb.AppendLine($"[온도 태그 폴링] 주기 {temp.GetProperty("intervalMs").GetInt32()}ms, " +
+                           $"최근 한 바퀴 소요시간 {temp.GetProperty("lastCycleDurationMs").GetInt64()}ms, " +
+                           $"태그 {temp.GetProperty("tagCount").GetInt32()}개");
+        }
+
+        sb.AppendLine();
+        int failureCount = root.TryGetProperty("failures", out var failures) ? failures.GetArrayLength() : 0;
+        if (failureCount > 0)
+        {
+            sb.AppendLine("[최근 실패 로그]");
+            int i = 0;
+            foreach (var f in failures.EnumerateArray())
+            {
+                if (i++ >= 15) break;
+                sb.AppendLine($"  - {f.GetProperty("plcId").GetString()}: {f.GetProperty("message").GetString()}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("[최근 실패 로그] 없음 — 모든 PLC 정상 통신 중");
+        }
+
+        return sb.ToString();
     }
 
     // col_name으로 쓸 수 있는 안전한 식별자인지 검사.

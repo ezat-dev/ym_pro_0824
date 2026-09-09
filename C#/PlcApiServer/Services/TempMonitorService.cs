@@ -26,6 +26,8 @@
 // ============================================================================
 
 using MySqlConnector;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using PlcApiServer.Repositories;
 using PlcApiServer.Models;
@@ -38,6 +40,32 @@ public class TempMonitorService : BackgroundService
     private readonly IConfiguration _config;
     private readonly PlcRepository _repo;       // 메인 DB 커넥션 문자열(ConnectionStrings:MariaDb) 제공용
     private readonly PlcServiceCache _cache;
+
+    // ── 폴링 상태 노출 (LiveTagMonitorService와 동일한 목적 — 관리 화면의 폴링 상태 패널용) ──
+    public long LastCycleDurationMs { get; private set; }
+    public DateTime? LastPollAt { get; private set; }
+    public int IntervalMs { get; private set; } = 30000;
+    private int _lastTagCount = 0;
+    public int LastTagCount => _lastTagCount;
+
+    private readonly ConcurrentQueue<PollFailureEntry> _failures = new();
+    private const int MaxFailures = 30;
+    private void RecordFailure(string plcId, string? device, string message)
+    {
+        _failures.Enqueue(new PollFailureEntry(DateTime.Now, plcId, device, message));
+        while (_failures.Count > MaxFailures) _failures.TryDequeue(out _);
+    }
+    public IReadOnlyList<PollFailureEntry> RecentFailures => _failures.ToArray().Reverse().ToList();
+
+    // ── 한 바퀴 소요시간 이력 (차트용) — 30초 주기라 120건이면 최근 1시간치 ──────────────
+    private readonly ConcurrentQueue<CycleDurationEntry> _durationHistory = new();
+    private const int MaxDurationHistory = 120;
+    public IReadOnlyList<CycleDurationEntry> DurationHistory => _durationHistory.ToArray();
+    private void RecordCycleDuration(long ms)
+    {
+        _durationHistory.Enqueue(new CycleDurationEntry(DateTime.Now, ms));
+        while (_durationHistory.Count > MaxDurationHistory) _durationHistory.TryDequeue(out _);
+    }
 
     // ── DDL 최초 1회 실행 제어 ───────────────────────────────────────────────
     // EnsureTablesAsync  : 서비스 시작 후 최초 1회만 실행
@@ -72,6 +100,7 @@ public class TempMonitorService : BackgroundService
         }
 
         if (chunkSize < 1) chunkSize = 100;
+        IntervalMs = intervalMs;
         _logger.LogInformation("TempMonitorService started. IntervalMs={Interval}, ChunkSize={ChunkSize}", intervalMs, chunkSize);
 
         // 최초 기동 시 다음 경계(intervalMs 배수)에 맞춰 대기
@@ -94,11 +123,17 @@ public class TempMonitorService : BackgroundService
 
             try
             {
+                var sw = Stopwatch.StartNew();
                 await PollOnceAsync(chunkSize, scheduledTick, stoppingToken);
+                sw.Stop();
+                LastCycleDurationMs = sw.ElapsedMilliseconds;
+                RecordCycleDuration(LastCycleDurationMs);
+                LastPollAt = DateTime.Now;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "TempMonitorService poll error");
+                RecordFailure("(전체)", null, ex.Message);
             }
 
             scheduledTick = nextScheduled;   // 다음 경계로 전진 (poll 지연과 무관)
@@ -184,6 +219,7 @@ SELECT t.temp_id, t.tag_name, t.address, t.col_name, t.scale,
         }
 
         if (!validTags.Any()) return;
+        _lastTagCount = validTags.Count;
 
         var valueMap = new Dictionary<string, int?>();
 
@@ -194,25 +230,39 @@ SELECT t.temp_id, t.tag_name, t.address, t.col_name, t.scale,
             validTags.GroupBy(t => t.Plc.Id).Select(async group =>
             {
                 var plc = group.First().Plc;
-                var svc = _cache.GetOrCreate(plc);   // PlcServiceCache → 이 PLC 전용 PlcService(TCP 연결) 획득
-
-                var addrList = group.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
-                var chunks   = BuildChunks(addrList, chunkSize);
-
-                // ── 실제 PLC와의 TCP 통신이 일어나는 지점 ──
-                // 청크 전체를 "연결 1개"로 순서대로 읽는다 (AlarmMonitorService와 동일한 이유).
-                var localMap = await svc.ReadWordsBatchAsync(chunks, "D", (start, count, ex) =>
+                try
                 {
-                    _logger.LogWarning(ex,
-                        "Temp PLC read failed. PlcId={PlcId}, Start={Start}, Count={Count}",
-                        plc.Id, start, count);
-                });
+                    var svc = _cache.GetOrCreate(plc);   // PlcServiceCache → 이 PLC 전용 PlcService(TCP 연결) 획득
 
-                return group.Select(tag =>
+                    var addrList = group.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
+                    var chunks   = BuildChunks(addrList, chunkSize);
+
+                    // ── 실제 PLC와의 TCP 통신이 일어나는 지점 ──
+                    // 청크 전체를 "연결 1개"로 순서대로 읽는다 (AlarmMonitorService와 동일한 이유).
+                    var localMap = await svc.ReadWordsBatchAsync(chunks, "D", (start, count, ex) =>
+                    {
+                        _logger.LogWarning(ex,
+                            "Temp PLC read failed. PlcId={PlcId}, Start={Start}, Count={Count}",
+                            plc.Id, start, count);
+                        RecordFailure(plc.Id, "D", $"D{start}~{start + count - 1} 읽기 실패: {ex.Message}");
+                    });
+
+                    return group.Select(tag =>
+                    {
+                        int? val = localMap.TryGetValue(tag.AddressValue, out var raw) ? raw : (int?)null;
+                        return (tag.ColName, val);
+                    }).ToList();
+                }
+                catch (Exception ex)
                 {
-                    int? val = localMap.TryGetValue(tag.AddressValue, out var raw) ? raw : (int?)null;
-                    return (tag.ColName, val);
-                }).ToList();
+                    // 이 PLC 그룹의 실패가 Task.WhenAll 전체를 fault시키면, 다른(정상) PLC의 값은 물론
+                    // 사이클 완료 기록(LastPollAt/소요시간)까지 전부 스킵된다. onRangeError는 "연결은
+                    // 됐는데 읽기 도중 실패"만 잡으므로, 연결 자체가 거부/타임아웃된 경우를 위해
+                    // 여기서도 RecordFailure를 남겨야 대시보드 "최근 실패"에 빠짐없이 보인다.
+                    _logger.LogWarning(ex, "Temp PLC group poll failed, skipping this group for this cycle. PlcId={PlcId}", plc.Id);
+                    RecordFailure(plc.Id, null, $"그룹 폴링 실패: {ex.Message}");
+                    return group.Select(tag => (tag.ColName, (int?)null)).ToList();
+                }
             }));
 
         foreach (var pairs in perPlcResults)

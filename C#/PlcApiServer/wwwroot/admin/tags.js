@@ -72,6 +72,22 @@ function badge(enabled) {
   return `<span class="badge ${enabled ? 'badge-on' : 'badge-off'}">${enabled ? '사용' : '중지'}</span>`;
 }
 
+// PLC 관리 탭 전용 인라인 SVG 아이콘 — 오프라인 공장 PC에서도 항상 동일하게 보이도록
+// 아이콘 폰트/CDN 없이 마크업에 직접 심어서 쓴다(이모지 대체).
+const ICON = {
+  edit: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.83l-1.17-1.17a2 2 0 0 0-2.83 0L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg>',
+  trash: '<svg class="icon" viewBox="0 0 24 24"><path d="M5 7h14M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M7 7l1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/></svg>',
+  alertTriangle: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 4 3 20h18Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>',
+  checkCircle: '<svg class="icon" viewBox="0 0 24 24"><path d="M5 12.5 9.5 17 19 7"/></svg>',
+  bulb: '<svg class="icon" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M8 14.5A5 5 0 1 1 16 14.5c-.8 1-1.5 1.8-1.5 3H9.5c0-1.2-.7-2-1.5-3Z"/></svg>',
+  wrench: '<svg class="icon" viewBox="0 0 24 24"><path d="M14.5 6.5a3.5 3.5 0 0 0-4.6 4L4 16.4 7.6 20l5.9-5.9a3.5 3.5 0 0 0 4-4.6l-2.6 2.6-2-2Z"/></svg>',
+  copy: '<svg class="icon" viewBox="0 0 24 24"><path d="M9 9h9a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 18 21H9a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 9 9Z"/><path d="M6 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V6"/></svg>',
+  antenna: '<svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 13.4V19M9.5 19h5"/></svg>',
+  folder: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l1.5 2h7A1.5 1.5 0 0 1 19.5 9.5v7A1.5 1.5 0 0 1 18 18H5.5A1.5 1.5 0 0 1 4 16.5v-9Z"/></svg>',
+  thermo: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg>',
+  bell: '<svg class="icon" viewBox="0 0 24 24"><path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>'
+};
+
 // ── 검색 + 정렬 공용 헬퍼 ───────────────────────────────────────────────────
 // searchKeys에 있는 필드들을 한꺼번에 대소문자 무시 부분일치로 검색하고, sort가 있으면 그다음 정렬한다.
 function filterAndSort(list, searchTerm, searchKeys, sort) {
@@ -121,6 +137,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // "실시간 모니터링" 탭에 처음 들어오거나 다시 들어올 때마다, 다음 주기적 갱신을 기다리지 않고
     // 바로 한 번 최신값을 가져온다(탭을 오래 떠나있었으면 그만큼 화면이 낡아있으므로).
     if (btn.dataset.tab === 'monitor') refreshAllMonitor();
+    if (btn.dataset.tab === 'plc') refreshPollStatus();
   });
 });
 
@@ -180,8 +197,8 @@ function renderPlcTable() {
       <td>${escapeHtml(p.plcType)}</td>
       <td>${badge(p.enabled)}</td>
       <td class="row-actions">
-        <button class="row-icon-btn" data-act="edit" title="수정">✎</button>
-        <button class="row-icon-btn is-danger" data-act="del" title="삭제">✕</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
       </td>
     </tr>`).join('');
   [...body.children].forEach((tr, i) => {
@@ -284,8 +301,8 @@ function renderFolderTree(listEl, items, selectedId, handlers, allLabel) {
       li.className = 'folder-row depth-' + Math.min(depth, 2) + (it.id === selectedId ? ' is-selected' : '');
       li.innerHTML = `<span class="fr-name">${escapeHtml(it.name)}</span>
         <span class="fr-actions">
-          <button data-act="rename" title="이름 변경">✎</button>
-          <button data-act="delete" title="삭제">✕</button>
+          <button data-act="rename" title="이름 변경">${ICON.edit}</button>
+          <button data-act="delete" title="삭제">${ICON.trash}</button>
         </span>`;
       li.querySelector('.fr-name').addEventListener('click', () => handlers.onSelect(it));
       li.querySelector('[data-act=rename]').addEventListener('click', e => { e.stopPropagation(); handlers.onRename(it); });
@@ -326,7 +343,7 @@ async function selectFolder(id) {
   selectedFolderId = id;
   const f = id === 'ALL' ? null : folders.find(x => x.id === id);
   document.getElementById('folderTagsTitle').innerHTML =
-    (id === 'ALL' ? '📡 전체 모니터링 태그' : `📁 ${escapeHtml(f ? f.name : '')}`) + ' <span class="table-tag">folders_tags</span>';
+    (id === 'ALL' ? `${ICON.antenna} 전체 모니터링 태그` : `${ICON.folder} ${escapeHtml(f ? f.name : '')}`) + ' <span class="table-tag">folders_tags</span>';
   document.getElementById('docFolderId').textContent = id === 'ALL' ? '4' : id;
   updateFolderTagExportLink();
   renderFolderTree(document.getElementById('folderList'), folders, selectedFolderId, folderTreeHandlers());
@@ -395,9 +412,9 @@ function renderFolderTagTable() {
       <td>${escapeHtml(t.type)}</td>
       <td>${badge(t.enabled)}</td>
       <td class="row-actions">
-        <button class="row-icon-btn" data-act="edit" title="수정">✎</button>
-        <button class="row-icon-btn" data-act="dup" title="복제">⧉</button>
-        <button class="row-icon-btn is-danger" data-act="del" title="삭제">✕</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn" data-act="dup" title="복제">${ICON.copy}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
       </td>
     </tr>`).join('');
   [...body.children].forEach((tr, i) => {
@@ -521,7 +538,7 @@ async function loadEquipIds() {
 }
 async function selectEquip(eq) {
   selectedEquipId = eq;
-  document.getElementById('tempTagsTitle').innerHTML = (eq ? `🌡 ${escapeHtml(eq)}` : '🌡 전체 온도 태그') + ' <span class="table-tag">tb_temp_tag</span>';
+  document.getElementById('tempTagsTitle').innerHTML = (eq ? `${ICON.thermo} ${escapeHtml(eq)}` : `${ICON.thermo} 전체 온도 태그`) + ' <span class="table-tag">tb_temp_tag</span>';
   updateTempTagExportLink();
   await loadEquipIds();
   await loadTempTags();
@@ -553,9 +570,9 @@ function renderTempTagTable() {
       <td>${escapeHtml(t.equipId || '—')}</td>
       <td>${badge(t.enabled)}</td>
       <td class="row-actions">
-        <button class="row-icon-btn" data-act="edit" title="수정">✎</button>
-        <button class="row-icon-btn" data-act="dup" title="복제">⧉</button>
-        <button class="row-icon-btn is-danger" data-act="del" title="삭제">✕</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn" data-act="dup" title="복제">${ICON.copy}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
       </td>
     </tr>`).join('');
   [...body.children].forEach((tr, i) => {
@@ -683,7 +700,7 @@ async function selectAlarmFolder(id) {
   selectedAlarmFolderId = id;
   const f = id === 'ALL' ? null : alarmFolders.find(x => x.id === id);
   document.getElementById('alarmTagsTitle').innerHTML =
-    (id === 'ALL' ? '🔔 전체 알람 태그' : `🔔 ${escapeHtml(f ? f.name : '')}`) + ' <span class="table-tag">tb_alarm_tag</span>';
+    (id === 'ALL' ? `${ICON.bell} 전체 알람 태그` : `${ICON.bell} ${escapeHtml(f ? f.name : '')}`) + ' <span class="table-tag">tb_alarm_tag</span>';
   updateAlarmTagExportLink();
   renderFolderTree(document.getElementById('alarmFolderList'), alarmFolders, selectedAlarmFolderId, alarmFolderTreeHandlers(), '(전체)');
   await loadAlarmTags();
@@ -723,9 +740,9 @@ function renderAlarmTagTable() {
       <td>${t.level}</td>
       <td>${badge(t.enabled)}</td>
       <td class="row-actions">
-        <button class="row-icon-btn" data-act="edit" title="수정">✎</button>
-        <button class="row-icon-btn" data-act="dup" title="복제">⧉</button>
-        <button class="row-icon-btn is-danger" data-act="del" title="삭제">✕</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn" data-act="dup" title="복제">${ICON.copy}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
       </td>
     </tr>`).join('');
   [...body.children].forEach((tr, i) => {
@@ -809,6 +826,303 @@ document.getElementById('alarmTagImportFile').addEventListener('change', async e
 //    따라가 보여줄지"일 뿐이지 PLC 통신 빈도와는 무관하다.
 // ============================================================================
 function isMonitorTabActive() { return document.getElementById('tab-monitor').classList.contains('is-active'); }
+function isPlcTabActive() { return document.getElementById('tab-plc').classList.contains('is-active'); }
+
+// PLC 관리 화면 우측 — 백그라운드 폴링 두 서비스가 실제로 PLC별로 어떻게 묶여서 도는지,
+// 한 바퀴에 몇 ms 걸리는지, 최근 실패가 있었는지를 그대로 보여준다(PLC를 새로 두드리지 않음).
+function pollGroupRowHtml(g) {
+  return `
+    <div class="poll-group-row">
+      <span class="poll-group-plc">${escapeHtml(g.plcLabel)} <span class="write-log-time">(${escapeHtml(g.plcId)})</span></span>
+      <span class="poll-group-chip">폴더 <b>${g.folderTagCount}</b>개</span>
+      <span class="poll-group-chip">알람 <b>${g.alarmTagCount}</b>개</span>
+      <span class="poll-group-chip">→ 한 번에 <b>${g.folderTagCount + g.alarmTagCount}</b>개 묶어서 읽음</span>
+    </div>`;
+}
+
+// ms를 초 단위 문자열로 — 주기(intervalMs)는 항상 딱 떨어지는 값이라 소수점 없이,
+// 실측 소요시간은 ms 단위 정밀도가 의미 있어서 소수점 3자리까지 보여준다.
+function msToSecExact(ms) { return `${(ms / 1000).toFixed(3)}초`; }
+function msToSecRound(ms) { return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}초`; }
+
+// 한 바퀴 소요시간 추이 스파크라인 — 축/눈금 없이 모양만 보여주고, 값은 호버 시 초 단위로 알려준다.
+// 데이터셋 개수가 항상 1개로 고정이라(온도 트렌드와 달리 설비별로 늘었다 줄었다 하지 않음)
+// 매번 새로 만들 필요 없이 인스턴스 하나를 계속 재사용한다.
+const pollChartInstances = {};   // 'live' | 'temp' → Chart 인스턴스
+const POLL_CHART_COLORS = { live: '#4c6fef', temp: '#1fae6e' };
+
+function renderPollChart(key, canvasId, history) {
+  const canvas = document.getElementById(canvasId);
+  const labels = history.map(h => h.at);
+  const values = history.map(h => h.ms);
+
+  let chart = pollChartInstances[key];
+  if (chart) {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    chart.update('none');
+    return;
+  }
+
+  const color = POLL_CHART_COLORS[key];
+  chart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [{
+      data: values, borderColor: color, backgroundColor: color + '22',
+      borderWidth: 2, tension: 0.3, pointRadius: 0, pointHoverRadius: 3, fill: true, spanGaps: true
+    }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { displayColors: false, callbacks: {
+          title: () => '',
+          label: ctx => `${(ctx.parsed.y / 1000).toFixed(3)}초`
+        } }
+      }
+    }
+  });
+  pollChartInstances[key] = chart;
+}
+
+async function refreshPollStatus() {
+  if (!isPlcTabActive()) return;
+  try {
+    const { live, temp, failures } = await api('GET', '/api/admin/monitor/pollstatus');
+
+    document.getElementById('pollLiveInterval').textContent = `주기 ${msToSecRound(live.intervalMs)}`;
+    document.getElementById('pollLiveDuration').textContent = msToSecExact(live.lastCycleDurationMs);
+    document.getElementById('pollLiveLastAt').textContent = live.lastPollAt ? formatUpdatedAt(live.lastPollAt) : '아직 없음';
+    renderPollChart('live', 'pollLiveChart', live.durationHistory || []);
+    const liveGroups = document.getElementById('pollLiveGroups');
+    liveGroups.innerHTML = live.groups.length
+      ? live.groups.map(pollGroupRowHtml).join('')
+      : '<div class="poll-group-empty">등록된 폴더/알람 태그가 없습니다.</div>';
+
+    document.getElementById('pollTempInterval').textContent = `주기 ${msToSecRound(temp.intervalMs)}`;
+    document.getElementById('pollTempDuration').textContent = msToSecExact(temp.lastCycleDurationMs);
+    document.getElementById('pollTempLastAt').textContent = temp.lastPollAt ? formatUpdatedAt(temp.lastPollAt) : '아직 없음';
+    renderPollChart('temp', 'pollTempChart', temp.durationHistory || []);
+    document.getElementById('pollTempGroups').innerHTML = temp.tagCount > 0
+      ? `<div class="poll-group-row"><span class="poll-group-chip">온도 태그 <b>${temp.tagCount}</b>개 (같은 PLC끼리 묶어서 읽음)</span></div>`
+      : '<div class="poll-group-empty">등록된 온도 태그가 없습니다.</div>';
+
+    const failureStrip = document.getElementById('pollFailureStrip');
+    const failureLabel = document.getElementById('pollFailureStripLabel');
+    const failureList = document.getElementById('pollFailureList');
+    failureStrip.classList.toggle('is-ok', failures.length === 0);
+    failureStrip.classList.toggle('is-alert', failures.length > 0);
+    failureLabel.innerHTML = failures.length > 0 ? `${ICON.alertTriangle} 최근 실패 ${failures.length}건` : `${ICON.checkCircle} 최근 실패 없음`;
+    failureList.innerHTML = failures.map(f => `
+      <div class="poll-failure-row">
+        <div class="poll-failure-meta">${formatUpdatedAt(f.at)} · ${escapeHtml(f.source)} · ${escapeHtml(f.plcId)}${f.device ? ' · ' + escapeHtml(f.device) : ''}</div>
+        ${escapeHtml(f.message)}
+      </div>`).join('');
+
+    renderDiagnosis(live, temp, failures);
+    document.getElementById('pollStatusUpdatedAt').textContent = formatUpdatedAt(new Date().toISOString());
+  } catch (e) { showToast('폴링 상태 조회 실패: ' + e.message, 'error'); }
+}
+setInterval(() => { if (isPlcTabActive()) refreshPollStatus(); }, 3000);
+
+// 규칙 기반 진단 — 별도 AI API 없이, 실제 실패 메시지 문구·연속실패 횟수·최근 몇 초간 지속됐는지를
+// 그 자리에서 분석해서 "지금 뭐가 문제인지"를 문장으로 요약한다. tb_plc(그룹 라벨)와
+// 방금 받은 실패 이력만 가지고 판단하므로 매 새로고침(3초)마다 최신 상태로 다시 계산된다.
+function diagnoseFailureGroup(plcId, label, list) {
+  const msgs = list.map(f => f.message).join(' ');
+  let reason = '통신 실패';
+  let tip = '연결 상태를 확인해보세요.';
+  if (msgs.includes('거부')) {
+    reason = '연결 거부 — PLC가 꺼져있거나 IP·포트가 다른 것으로 보입니다';
+    tip = 'PLC 전원, tb_plc에 등록된 IP·포트, 네트워크 케이블/방화벽을 확인해보세요.';
+  } else if (msgs.includes('락 획득')) {
+    reason = '내부 대기 지연 — 다른 요청이 같은 PLC 연결을 오래 붙잡고 있습니다';
+    tip = '보통 일시적입니다. 계속되면 그 PLC 자체 응답이 원래 느린 건 아닌지 확인해보세요.';
+  } else if (msgs.includes('타임아웃')) {
+    reason = '응답 없음(타임아웃) — 연결은 되지만 PLC가 제때 응답하지 않습니다';
+    tip = 'PLC 부하나 케이블·스위치 쪽 간헐적 단절 가능성을 확인해보세요.';
+  }
+
+  let maxStreak = 0;
+  list.forEach(f => {
+    const m = f.message.match(/연속실패 (\d+)회/);
+    if (m) maxStreak = Math.max(maxStreak, parseInt(m[1], 10));
+  });
+  const spanSec = Math.round((new Date(list[0].at) - new Date(list[list.length - 1].at)) / 1000);
+  const streakText = maxStreak > 0 ? `연속 ${maxStreak}회 실패` : `최근 ${list.length}건 실패`;
+  const durationText = spanSec > 1 ? `, ${spanSec}초째 지속 중` : '';
+
+  return `
+    <div class="poll-diagnosis-item is-problem">
+      <b>${escapeHtml(label)}</b> <span class="write-log-time">(${escapeHtml(plcId)})</span> — ${reason}<br>
+      ${streakText}${durationText}
+      <span class="diag-tip">${ICON.bulb} ${tip}</span>
+    </div>`;
+}
+
+let aiNoteActive = false;   // true가 되면(AI 분석 성공) 3초마다 도는 규칙 기반 갱신이 그 내용을 덮어쓰지 않는다.
+
+function renderDiagnosis(live, temp, failures) {
+  if (aiNoteActive) return;   // 지금 보여주는 게 AI 분석 결과라면 규칙 기반 내용으로 되돌리지 않는다.
+  const body = document.getElementById('pollDiagnosisBody');
+  body.className = 'poll-diagnosis-body';
+  const byPlc = {};
+  failures.forEach(f => {
+    if (f.plcId === '(전체)') return;   // 옛 방식의 뭉뚱그려진 로그(지금은 거의 안 나옴)는 진단에서 제외
+    (byPlc[f.plcId] ||= []).push(f);
+  });
+
+  const items = Object.entries(byPlc).map(([plcId, list]) => {
+    const group = live.groups.find(g => g.plcId === plcId);
+    return diagnoseFailureGroup(plcId, group ? group.plcLabel : plcId, list);
+  });
+
+  const okGroups = live.groups.filter(g => !byPlc[g.plcId]);
+  if (okGroups.length > 0) {
+    items.push(`
+      <div class="poll-diagnosis-item is-ok">
+        ${okGroups.map(g => escapeHtml(g.plcLabel)).join(', ')} 정상 통신 중 (한 바퀴 ${msToSecExact(live.lastCycleDurationMs)})
+      </div>`);
+  }
+
+  body.innerHTML = items.length > 0
+    ? items.join('')
+    : '<div class="poll-diagnosis-item is-ok">현재 모든 PLC가 정상 통신 중입니다.</div>';
+}
+
+// "AI로 분석" 버튼 — 누른 시점의 최신 폴링 상태를 다시 받아서(오래된 값 안 쓰게) 로컬 Ollama에게
+// 그대로 넘기고, 자연어로 된 설명을 받아온다. PLC/DB는 새로 두드리지 않는다(이미 있는 상태 요약만 사용).
+// 성공하면 aiNoteActive를 켜서, 이후 3초마다 도는 규칙 기반 진단이 이 내용을 덮어쓰지 않게 한다.
+document.getElementById('pollAiAskBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('pollAiAskBtn');
+  const out = document.getElementById('pollDiagnosisBody');
+  btn.disabled = true;
+  out.className = 'poll-diagnosis-body is-loading';
+  out.textContent = 'DB와 최근 이력을 살펴보는 중... (로컬 모델이라 몇 초~몇십 초 걸릴 수 있습니다)';
+  try {
+    const status = await api('GET', '/api/admin/monitor/pollstatus');
+    const res = await fetch('/api/admin/monitor/ai-diagnosis', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(status)
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'AI 분석 실패');
+    out.className = 'poll-diagnosis-body is-ai';
+    out.textContent = json.analysis || '(빈 응답)';
+    aiNoteActive = true;
+  } catch (e) {
+    out.className = 'poll-diagnosis-body is-error';
+    out.textContent = '분석 실패: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ============================================================================
+// AI 채팅(자연어 조작) — 서버(/api/admin/chat)가 Ollama의 tool-calling으로 어떤 동작인지
+// 해석해서, 조회는 바로 실행한 결과를 자연어로 요약해 돌려주고, 값쓰기/온도 태그 추가처럼
+// 실제 설비·DB에 영향을 주는 "쓰기"는 곧장 실행하지 않고 "이 동작을 실행할까요?"만 돌려준다.
+// 대화 상태(chatTranscript)는 서버가 무상태이므로 여기서만 들고 있다가 매번 전체를 다시 보낸다.
+// ============================================================================
+let chatTranscript = [];       // 서버가 돌려준 messages 배열을 그대로 이어받아 들고 있는다.
+let chatPending = null;        // 확인 대기 중인 "쓰기" 동작 — { name, arguments, description }
+let chatBusy = false;
+let chatLastToolsUsed = null;  // 방금 도착한 답변을 만드는 데 쓰인 도구 이름들(마지막 메시지 옆에만 표시)
+let chatLocalError = null;     // 네트워크/서버 오류 — 실제 대화가 아니므로 chatTranscript에는 안 남기고 화면에만 보여준다.
+
+function renderChatMessages() {
+  const wrap = document.getElementById('chatMessages');
+  const parts = [];
+
+  chatTranscript.forEach((m, i) => {
+    if (m.role !== 'user' && m.role !== 'assistant') return;   // tool 메시지(원본 JSON)는 화면에 그대로 노출하지 않는다.
+    if (m.role === 'assistant' && !m.content) return;          // 도구 호출만 담긴 빈 assistant 메시지는 건너뛴다.
+
+    const isLast = i === chatTranscript.length - 1;
+    const toolsNote = (isLast && m.role === 'assistant' && chatLastToolsUsed && chatLastToolsUsed.length > 0)
+      ? `<div class="chat-tools-used">${ICON.wrench} ${chatLastToolsUsed.map(escapeHtml).join(', ')} 사용함</div>`
+      : '';
+    parts.push(`
+      <div class="chat-msg is-${m.role}">
+        ${toolsNote}
+        <div class="chat-bubble">${escapeHtml(m.content)}</div>
+      </div>`);
+  });
+
+  if (chatBusy) {
+    // 확인 실행 중일 수도 있으므로(chatPending이 아직 안 지워졌을 수 있음) busy를 최우선으로 본다 —
+    // 응답 오는 동안 확인 카드가 그대로 남아있으면 실행 버튼을 중복 클릭할 수 있기 때문.
+    parts.push('<div class="chat-msg is-assistant chat-thinking"><div class="chat-bubble">생각 중...</div></div>');
+  } else if (chatPending) {
+    parts.push(`
+      <div class="chat-confirm-card">
+        <div class="chat-confirm-label">${ICON.alertTriangle} 실행 확인</div>
+        <div class="chat-confirm-desc">${escapeHtml(chatPending.description)}</div>
+        <div class="chat-confirm-actions">
+          <button type="button" class="btn btn-sm btn-ghost" data-chat-action="cancel">취소</button>
+          <button type="button" class="btn btn-sm btn-primary" data-chat-action="confirm">실행</button>
+        </div>
+      </div>`);
+  } else if (chatLocalError) {
+    parts.push(`<div class="chat-msg is-assistant is-error"><div class="chat-bubble">${ICON.alertTriangle} ${escapeHtml(chatLocalError)}</div></div>`);
+  }
+
+  document.getElementById('chatEmpty').hidden = parts.length > 0;
+  wrap.querySelectorAll('.chat-msg, .chat-confirm-card').forEach(el => el.remove());
+  wrap.insertAdjacentHTML('beforeend', parts.join(''));
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function setChatBusy(busy) {
+  chatBusy = busy;
+  document.getElementById('chatInput').disabled = busy;
+  document.getElementById('chatSendBtn').disabled = busy;
+  renderChatMessages();
+}
+
+async function runChatTurn(payload) {
+  chatLocalError = null;
+  setChatBusy(true);
+  try {
+    const res = await api('POST', '/api/admin/chat', payload);
+    chatTranscript = res.messages;
+    chatPending = res.pendingConfirm || null;
+    chatLastToolsUsed = (!chatPending && res.toolsUsed && res.toolsUsed.length > 0) ? res.toolsUsed : null;
+  } catch (e) {
+    // 네트워크/서버 오류는 실제 대화가 아니므로 chatTranscript에는 남기지 않는다(다음에 그대로 Ollama에게
+    // 다시 보내지는 히스토리를 오염시키지 않기 위함) — 화면에만 별도로 보여준다.
+    chatLocalError = e.message;
+  } finally {
+    setChatBusy(false);
+    document.getElementById('chatInput').focus();
+  }
+}
+
+document.getElementById('chatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  if (chatBusy || chatPending) return;   // 확인 대기 중에는 실행/취소부터 정리해야 다음 요청을 보낼 수 있다.
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  chatTranscript.push({ role: 'user', content: text });
+  chatLastToolsUsed = null;
+  runChatTurn({ messages: chatTranscript });
+});
+
+document.getElementById('chatMessages').addEventListener('click', e => {
+  const action = e.target.dataset.chatAction;
+  if (!action) return;
+  if (action === 'cancel') {
+    chatTranscript.pop();   // 확인 대기 중이던 assistant의 tool_calls 메시지를 되돌린다(서버에는 보내지 않음).
+    chatPending = null;
+    renderChatMessages();
+  } else if (action === 'confirm') {
+    runChatTurn({ messages: chatTranscript, confirm: true });
+  }
+});
 
 function formatUpdatedAt(iso) {
   if (!iso) return '-';
@@ -823,13 +1137,17 @@ const TREND_COLORS = ['#0f6d8c', '#c0392b', '#b9770e', '#1e8449', '#6c5ce7', '#e
 const tempChartInstances = new Map(); // 설비명 → Chart 인스턴스. 매번 새로 만들지 않고 데이터만 갱신해서
                                        // 30초마다 차트가 깜빡이며 다시 그려지는 걸 막는다.
 
-function shortTimeLabel(iso) {
-  return new Date(iso).toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+// 1일을 넘는 기간(24시간/3일/7일)을 고르면 시:분만으로는 어느 날인지 알 수 없어서 날짜도 같이 찍는다.
+function shortTimeLabel(iso, includeDate) {
+  const opts = includeDate
+    ? { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
+    : { hour12: false, hour: '2-digit', minute: '2-digit' };
+  return new Date(iso).toLocaleString('ko-KR', opts);
 }
 
 // 태그마다 스냅샷 행이 살짝 어긋나 있어도(널 스킵 등으로 개수가 다를 수 있음) 안전하게 맞추려고,
 // 그룹 전체 타임스탬프의 합집합을 x축으로 놓고 태그별 값을 그 위치에 맞춰 채운다(없으면 null).
-function buildAlignedSeries(groupTags) {
+function buildAlignedSeries(groupTags, includeDate) {
   const labelSet = new Set();
   groupTags.forEach(t => (t.series || []).forEach(p => labelSet.add(p.t)));
   const rawLabels = [...labelSet].sort();
@@ -837,7 +1155,7 @@ function buildAlignedSeries(groupTags) {
     const map = new Map((t.series || []).map(p => [p.t, p.v]));
     return { name: t.trendName || t.tagName, values: rawLabels.map(l => (map.has(l) ? map.get(l) : null)) };
   });
-  return { labels: rawLabels.map(shortTimeLabel), namedSeries };
+  return { labels: rawLabels.map(l => shortTimeLabel(l, includeDate)), namedSeries };
 }
 
 function makeTempDataset(name, values, colorIdx) {
@@ -919,6 +1237,35 @@ document.getElementById('monFolderSelect').addEventListener('change', refreshMon
 let monFolderTags = [];
 let selectedWriteTagIds = new Set();
 let writeAnchorIndex = null;
+
+// 값쓰기 패널 하단의 최근 이력 — 값쓰기 성공 직후 + 주기적으로 다시 불러온다.
+// 조회 실패는 조용히 무시한다(이력 조회가 안 된다고 값쓰기 화면 자체가 막히면 안 됨).
+async function refreshWriteLog() {
+  try {
+    const { logs } = await api('GET', '/api/admin/monitor/taglog?limit=30');
+    const list = document.getElementById('writeLogList');
+    if (!logs || logs.length === 0) {
+      list.innerHTML = '<div class="write-log-empty">아직 기록된 값 변경 이력이 없습니다</div>';
+      return;
+    }
+    list.innerHTML = logs.map(l => {
+      const time = new Date(l.writtenAt).toLocaleString('ko-KR',
+        { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      const label = l.tagName || l.address;
+      return `
+      <div class="write-log-row">
+        <span class="write-log-name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+        <span class="write-log-time">${time}</span>
+        <div class="write-log-detail">
+          <span>${escapeHtml(l.address)}</span>
+          <span class="write-log-old">${l.oldValue === null ? '—' : l.oldValue}</span>
+          <span class="write-log-arrow">→</span>
+          <span class="write-log-new">${l.newValue}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) { /* 무시 */ }
+}
 
 async function refreshMonitorFolder() {
   const folderId = document.getElementById('monFolderSelect').value;
@@ -1026,6 +1373,7 @@ document.getElementById('writePanelForm').addEventListener('submit', async e => 
   panel.classList.add('is-flash');
   setTimeout(() => panel.classList.remove('is-flash'), 700);
   await refreshMonitorFolder();
+  refreshWriteLog();
 });
 
 // ── 4-2) 알람 태그 실시간 상태 ──────────────────────────────────────────
@@ -1125,6 +1473,7 @@ async function writeAlarmValue(tag, value) {
     if (!json.success) throw new Error(json.error || '쓰기 실패');
     showToast(`"${tag.tagName}"에 ${value} 썼습니다`, 'success');
     await refreshMonitorAlarm();
+    refreshWriteLog();
   } catch (e) { showToast('쓰기 실패: ' + e.message, 'error'); }
 }
 
@@ -1145,6 +1494,7 @@ async function writeAlarmValuesBatch(tags, value) {
   else if (okCount === 0) showToast(`${failCount}개 태그 쓰기 모두 실패`, 'error');
   else showToast(`${okCount}개 성공 / ${failCount}개 실패`, 'error');
   await refreshMonitorAlarm();
+  refreshWriteLog();
 }
 document.getElementById('alarmBatchOnBtn').addEventListener('click', () =>
   writeAlarmValuesBatch(monAlarmTags.filter(t => selectedAlarmTagIds.has(t.tagId)), 1));
@@ -1175,9 +1525,23 @@ function groupTempTagsByEquip(tags) {
   return groups;
 }
 
+const TEMP_RANGE_LABELS = { 60: '1시간', 180: '3시간', 360: '6시간', 1440: '24시간', 4320: '3일', 10080: '7일' };
+let monTempRangeMins = 360;   // 기본 6시간
+
+document.querySelectorAll('#monTempRangeGroup .range-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#monTempRangeGroup .range-btn').forEach(b => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    monTempRangeMins = Number(btn.dataset.mins);
+    document.getElementById('monTempRangeLabel').textContent = `tb_temp_snapshot 최근 ${TEMP_RANGE_LABELS[monTempRangeMins]}`;
+    refreshMonitorTemp();
+  });
+});
+
 async function refreshMonitorTemp() {
   const equipId = document.getElementById('monTempEquipSelect').value;
-  const qs = '?minutes=60' + (equipId ? `&equipId=${encodeURIComponent(equipId)}` : '');
+  const qs = `?minutes=${monTempRangeMins}` + (equipId ? `&equipId=${encodeURIComponent(equipId)}` : '');
+  const includeDate = monTempRangeMins >= 1440;   // 24시간 이상이면 자정을 넘나들 수 있어 날짜도 같이 표시
   try {
     const { tags } = await api('GET', '/api/admin/monitor/temptags' + qs);
     const grid = document.getElementById('monTempGrid');
@@ -1204,7 +1568,7 @@ async function refreshMonitorTemp() {
 
     for (const [equip, groupTags] of groups) {
       const card = ensureTempCard(equip, groupTags.length);
-      const { labels, namedSeries } = buildAlignedSeries(groupTags);
+      const { labels, namedSeries } = buildAlignedSeries(groupTags, includeDate);
       renderOrUpdateTempChart(card, labels, namedSeries);
       card.querySelector('.trend-legend').innerHTML = groupTags.map((t, i) => `
         <div class="trend-legend-item">
@@ -1219,12 +1583,13 @@ async function refreshMonitorTemp() {
 async function refreshAllMonitor() {
   if (!isMonitorTabActive()) return;
   await Promise.all([refreshMonitorFolder(), refreshMonitorAlarm(), refreshMonitorTemp()]);
+  refreshWriteLog();
 }
 
 // 값 자체는 서버가 2초/30초 주기로 이미 갱신해두므로, 화면 새로고침은 그보다 약간 여유있게 잡는다
-// (모니터링·알람은 2.5초 — 서버 폴링 주기와 거의 맞춤, 온도는 30초 — 어차피 그 주기로만 바뀜).
-setInterval(() => { if (isMonitorTabActive()) { refreshMonitorFolder(); refreshMonitorAlarm(); } }, 2500);
-setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 30000);
+// (모니터링·알람은 2.5초 — 서버 폴링 주기와 거의 맞춤, 온도는 1분 — 화면 로드 후 요청된 주기).
+setInterval(() => { if (isMonitorTabActive()) { refreshMonitorFolder(); refreshMonitorAlarm(); refreshWriteLog(); } }, 2500);
+setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 60000);
 
 // ============================================================================
 // 초기 로딩
@@ -1254,6 +1619,7 @@ setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 30000);
     populateMonitorAlarmFolderSelect();
     // 실시간 모니터링의 알람 서브탭은 "전체"(238개) 대신 첫 폴더로 좁혀서 시작한다 — 그게 더 쓸모있다.
     if (alarmFolders.length > 0) document.getElementById('monAlarmFolderSelect').value = alarmFolders[0].id;
+    await refreshPollStatus();          // PLC 관리가 기본 진입 탭이라 첫 화면부터 바로 채워준다
   } catch (e) {
     showToast('초기 로딩 실패: ' + e.message, 'error');
   }

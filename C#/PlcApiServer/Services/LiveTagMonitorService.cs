@@ -47,12 +47,23 @@
 // ============================================================================
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using MySqlConnector;
 using PlcApiServer.Repositories;
 using PlcApiServer.Models;
 
 namespace PlcApiServer.Services;
+
+// 폴링 실패 1건 — "실패시에만 로그"용으로 관리 화면(폴링 상태 패널)에 최근 것만 보여준다.
+public sealed record PollFailureEntry(DateTime At, string PlcId, string? Device, string Message);
+
+// PLC 하나가 이번 사이클에 몇 개의 폴더/알람 태그를 "한 번에 묶어서" 읽고 있는지 —
+// 관리 화면에서 "어떻게 묶여서 폴링되는지"를 시각적으로 보여주기 위한 요약.
+public sealed record PollGroupInfo(string PlcId, string PlcLabel, int FolderTagCount, int AlarmTagCount);
+
+// 한 바퀴(사이클) 소요시간 1건 — 관리 화면의 "폴링 주기" 차트가 시간에 따른 추이를 그릴 때 쓴다.
+public sealed record CycleDurationEntry(DateTime At, long DurationMs);
 
 public class LiveTagMonitorService : BackgroundService
 {
@@ -64,6 +75,47 @@ public class LiveTagMonitorService : BackgroundService
     // ── 폴더태그 최신값 캐시 (tagId → raw 값) — DB에 쓰지 않고 메모리에만 유지, API가 직접 참조 ──
     public ConcurrentDictionary<int, int?> FolderTagValues { get; } = new();
     public DateTime? LastPollAt { get; private set; }
+    // 이번 사이클(모든 PLC 그룹의 Task.WhenAll)이 실제로 몇 ms 걸렸는지 — 관리 화면에 그대로 노출.
+    public long LastCycleDurationMs { get; private set; }
+    public int IntervalMs { get; private set; } = 2000;
+
+    // ── 최근 폴링 실패 (성공은 기록하지 않음 — "실패시에만 로그" 요구사항) ──────────────
+    private readonly ConcurrentQueue<PollFailureEntry> _failures = new();
+    private const int MaxFailures = 30;
+    private void RecordFailure(string plcId, string? device, string message)
+    {
+        _failures.Enqueue(new PollFailureEntry(DateTime.Now, plcId, device, message));
+        while (_failures.Count > MaxFailures) _failures.TryDequeue(out _);
+    }
+
+    // ── 한 바퀴 소요시간 이력 (차트용) — 2초 주기라 150건이면 최근 5분치 ───────────────
+    private readonly ConcurrentQueue<CycleDurationEntry> _durationHistory = new();
+    private const int MaxDurationHistory = 150;
+    public IReadOnlyList<CycleDurationEntry> DurationHistory => _durationHistory.ToArray();
+    private void RecordCycleDuration(long ms)
+    {
+        _durationHistory.Enqueue(new CycleDurationEntry(DateTime.Now, ms));
+        while (_durationHistory.Count > MaxDurationHistory) _durationHistory.TryDequeue(out _);
+    }
+    public IReadOnlyList<PollFailureEntry> RecentFailures => _failures.ToArray().Reverse().ToList();
+
+    // 현재 캐시된 태그를 PLC별로 묶어서 "이 PLC가 폴더+알람 태그를 몇 개씩 한 사이클에 같이
+    // 읽는지" 보여준다 — PollOnceAsync가 실제로 GroupBy(t => t.Plc.Id)로 묶는 것과 동일한 기준.
+    public List<PollGroupInfo> GetPollGroups()
+    {
+        var folderTags = _cachedFolderTags ?? new List<FolderTagRow>();
+        var alarmTags  = _cachedAlarmTags  ?? new List<AlarmTagRow>();
+        var labels = new Dictionary<string, string>();
+        foreach (var t in folderTags) labels[t.Plc.Id] = t.Plc.Label;
+        foreach (var t in alarmTags) labels[t.Plc.Id] = t.Plc.Label;
+
+        var folderCounts = folderTags.GroupBy(t => t.Plc.Id).ToDictionary(g => g.Key, g => g.Count());
+        var alarmCounts  = alarmTags.GroupBy(t => t.Plc.Id).ToDictionary(g => g.Key, g => g.Count());
+
+        return labels.Keys.OrderBy(id => id).Select(id => new PollGroupInfo(
+            id, labels[id], folderCounts.GetValueOrDefault(id, 0), alarmCounts.GetValueOrDefault(id, 0)
+        )).ToList();
+    }
 
     // ── 알람 상태 캐시 (tagId → 마지막 ON/OFF) — DB는 전환시에만 씀. 원래는 전환 감지에만 쓰던
     // private 필드였는데, "실시간 모니터링" 화면이 알람 현재 상태를 그대로 보여줘야 해서 공개했다.
@@ -99,6 +151,7 @@ public class LiveTagMonitorService : BackgroundService
         }
 
         if (chunkSize < 1) chunkSize = 100;
+        IntervalMs = intervalMs;
         _logger.LogInformation(
             "LiveTagMonitorService started. IntervalMs={Interval}, ChunkSize={ChunkSize}, TagCacheMs={TagCache}",
             intervalMs, chunkSize, tagCacheMs);
@@ -112,6 +165,7 @@ public class LiveTagMonitorService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "LiveTagMonitorService poll error");
+                RecordFailure("(전체)", null, ex.Message);
             }
 
             try
@@ -127,6 +181,10 @@ public class LiveTagMonitorService : BackgroundService
 
     private async Task PollOnceAsync(bool treatNonZeroAsOn, int chunkSize, int tagCacheMs, CancellationToken ct)
     {
+        // "한 바퀴 소요시간"은 여기서부터 잰다 — 태그 목록을 DB에서 다시 불러오는 [1]도 포함해야
+        // 진짜 "이번 폴링 사이클 전체"를 잰 게 된다(TagCacheMs 만료 시점엔 이 재조회도 매번 일어남).
+        var cycleStopwatch = Stopwatch.StartNew();
+
         // ── [1] 태그 목록 캐시 (알람 + 폴더태그 둘 다) ──────────────────────────
         if (_cachedAlarmTags == null || _cachedFolderTags == null ||
             (DateTime.UtcNow - _tagsCachedAt).TotalMilliseconds >= tagCacheMs)
@@ -161,6 +219,10 @@ public class LiveTagMonitorService : BackgroundService
         if (combined.Count == 0)
         {
             _logger.LogWarning("LiveTagMonitor: no valid tags configured (alarm+folderTag)");
+            cycleStopwatch.Stop();
+            LastCycleDurationMs = cycleStopwatch.ElapsedMilliseconds;
+            RecordCycleDuration(LastCycleDurationMs);
+            LastPollAt = DateTime.UtcNow;
             return;
         }
 
@@ -176,49 +238,64 @@ public class LiveTagMonitorService : BackgroundService
         await Task.WhenAll(combined.GroupBy(t => t.Plc.Id).Select(async plcGroup =>
         {
             var plc = plcGroup.First().Plc;
-            var svc = _cache.GetOrCreate(plc);
-            var groupAlarmResults = new List<(int TagId, bool IsOn, int Raw)>();
-
-            foreach (var devGroup in plcGroup.GroupBy(t => t.DeviceType))
+            try
             {
-                string deviceType = devGroup.Key;
-                // 알람 태그의 D1 + 폴더태그의 D2가 같은 PLC/디바이스라면 여기서 합쳐져서
-                // 하나의 청크로 묶인다 — 두 시스템이 따로 PLC에 왕복하지 않는다.
-                var addrList = devGroup.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
-                var chunks   = BuildChunks(addrList, chunkSize);
+                var svc = _cache.GetOrCreate(plc);
+                var groupAlarmResults = new List<(int TagId, bool IsOn, int Raw)>();
 
-                while (svc.HasPriorityWaiting)
-                    await Task.Delay(50);
-
-                var valueMap = await svc.ReadWordsBatchAsync(chunks, deviceType, (start, count, ex) =>
+                foreach (var devGroup in plcGroup.GroupBy(t => t.DeviceType))
                 {
-                    _logger.LogWarning(ex,
-                        "PLC read failed. PlcId={PlcId}, Device={Device}, Start={Start}, Count={Count}",
-                        plc.Id, deviceType, start, count);
-                });
+                    string deviceType = devGroup.Key;
+                    // 알람 태그의 D1 + 폴더태그의 D2가 같은 PLC/디바이스라면 여기서 합쳐져서
+                    // 하나의 청크로 묶인다 — 두 시스템이 따로 PLC에 왕복하지 않는다.
+                    var addrList = devGroup.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
+                    var chunks   = BuildChunks(addrList, chunkSize);
 
-                foreach (var tag in devGroup)
-                {
-                    if (!valueMap.TryGetValue(tag.AddressValue, out var raw)) continue;
+                    var valueMap = await svc.ReadWordsBatchAsync(chunks, deviceType, (start, count, ex) =>
+                    {
+                        _logger.LogWarning(ex,
+                            "PLC read failed. PlcId={PlcId}, Device={Device}, Start={Start}, Count={Count}",
+                            plc.Id, deviceType, start, count);
+                        RecordFailure(plc.Id, deviceType, $"{deviceType}{start}~{start + count - 1} 읽기 실패: {ex.Message}");
+                    });
 
-                    if (tag.IsAlarmSource)
+                    foreach (var tag in devGroup)
                     {
-                        bool isOn = treatNonZeroAsOn ? raw != 0 : raw == 1;
-                        groupAlarmResults.Add((tag.TagId, isOn, raw));
-                    }
-                    else
-                    {
-                        // 폴더태그: DB에 쓰지 않고 메모리에만 최신값 보관 (BIT/WORD 해석은 프론트 담당)
-                        FolderTagValues[tag.TagId] = raw;
+                        if (!valueMap.TryGetValue(tag.AddressValue, out var raw)) continue;
+
+                        if (tag.IsAlarmSource)
+                        {
+                            bool isOn = treatNonZeroAsOn ? raw != 0 : raw == 1;
+                            groupAlarmResults.Add((tag.TagId, isOn, raw));
+                        }
+                        else
+                        {
+                            // 폴더태그: DB에 쓰지 않고 메모리에만 최신값 보관 (BIT/WORD 해석은 프론트 담당)
+                            FolderTagValues[tag.TagId] = raw;
+                        }
                     }
                 }
-            }
 
-            // 이 PLC의 읽기가 끝나자마자 바로 전환 감지+DB 반영 (다른 PLC 그룹의 진행상황과 무관)
-            if (groupAlarmResults.Count > 0)
-                await ProcessAlarmTransitionsAsync(groupAlarmResults, isFirstPollThisCycle, ct);
+                // 이 PLC의 읽기가 끝나자마자 바로 전환 감지+DB 반영 (다른 PLC 그룹의 진행상황과 무관)
+                if (groupAlarmResults.Count > 0)
+                    await ProcessAlarmTransitionsAsync(groupAlarmResults, isFirstPollThisCycle, ct);
+            }
+            catch (Exception ex)
+            {
+                // 이 PLC 그룹의 실패(연결 거부 등)가 Task.WhenAll 전체를 fault시키면, 다른(정상) PLC
+                // 그룹이 이미 값을 다 갱신했어도 아래 사이클 완료 기록(LastPollAt/소요시간)이 통째로
+                // 스킵된다 — 그러면 "정상 PLC가 있는데도 폴링 상태가 계속 갱신 안 됨"이 된다.
+                // onRangeError는 "연결은 됐는데 읽기 도중 실패"만 잡는다 — 연결 자체가 거부/타임아웃되면
+                // (EnsureConnectedAsync 단계) onRangeError까지 가지도 못하고 여기로 바로 떨어지므로,
+                // 그 경우를 위해 여기서도 RecordFailure를 남겨야 대시보드 "최근 실패"에 빠짐없이 보인다.
+                _logger.LogWarning(ex, "PLC group poll failed, skipping this group for this cycle. PlcId={PlcId}", plc.Id);
+                RecordFailure(plc.Id, null, $"그룹 폴링 실패: {ex.Message}");
+            }
         }));
 
+        cycleStopwatch.Stop();
+        LastCycleDurationMs = cycleStopwatch.ElapsedMilliseconds;
+        RecordCycleDuration(LastCycleDurationMs);
         LastPollAt = DateTime.UtcNow;
         _firstPoll = false;
     }

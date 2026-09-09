@@ -71,12 +71,13 @@ builder.Services.AddSingleton<PlcRepository>();   // MariaDB(ez_scada.tb_plc) CR
 builder.Services.AddSingleton<PlcServiceCache>(); // ip:port 별 PlcService(TCP 연결) 재사용 캐시
 
 // BackgroundService 등록 — 앱 시작과 동시에 별도 스레드가 돌면서 PLC를 주기적으로 읽음
-// LiveTagMonitorService는 AddSingleton으로도 등록한다 — 아래 /api/foldertag/values 핸들러가
-// 이 "같은" 인스턴스를 DI로 주입받아 FolderTagValues(메모리 캐시)를 직접 읽어야 하기 때문.
+// 둘 다 AddSingleton으로도 등록한다 — 폴링 상태 API(/api/admin/monitor/pollstatus)가 이 "같은"
+// 인스턴스를 DI로 주입받아 FolderTagValues/LastCycleDurationMs 등을 직접 읽어야 하기 때문.
 // AddHostedService(sp => ...)로 넘겨줘야 호스트가 새 인스턴스를 또 만들지 않고 그 싱글톤을 그대로 구동한다.
 builder.Services.AddSingleton<LiveTagMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveTagMonitorService>());
-builder.Services.AddHostedService<TempMonitorService>();
+builder.Services.AddSingleton<TempMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TempMonitorService>());
 
 var app = builder.Build();
 app.UseCors();
@@ -88,6 +89,9 @@ app.UseStaticFiles();
 
 // "PLC 태그 관리" 화면 전용 CRUD API (폴더/폴더태그/온도태그/알람폴더/알람태그) — Endpoints/AdminTagEndpoints.cs
 app.MapAdminTagEndpoints();
+
+// "PLC 태그 관리" 화면의 채팅(자연어 조작) API — Endpoints/AdminChatEndpoints.cs
+app.MapAdminChatEndpoints();
 
 // ============================================================================
 // [A] 기본(default) PLC 1대 전용 API — DB를 거치지 않고 PlcRegistry(메모리)만 사용
@@ -550,6 +554,51 @@ static async Task<List<(int Id, int FolderId, string Name, string Address, strin
     return list;
 }
 
+// 실제 쓰기가 성공한 뒤에만 호출되는 이력 기록 — tb_tag_log가 없으면 그때그때 만든다.
+// 쓰기는 사람이 버튼을 누를 때만 일어나는 저빈도 동작이라, 매번 CREATE TABLE IF NOT EXISTS를
+// 다시 실행해도 비용 문제가 없다(TempMonitorService처럼 매 30초 도는 핫패스가 아님).
+// 기록 실패가 "쓰기 자체는 이미 성공"한 응답을 막으면 안 되므로 예외를 삼킨다(로그만 남김).
+static async Task LogTagWriteAsync(string connStr, string tagType, int? tagId, string? tagName, string address, string plcId, int? oldValue, int newValue)
+{
+    try
+    {
+        using var conn = new MySqlConnection(connStr);
+        await conn.OpenAsync();
+
+        using (var ddl = new MySqlCommand(@"
+CREATE TABLE IF NOT EXISTS tb_tag_log (
+    log_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tag_type   VARCHAR(10) NOT NULL,
+    tag_id     INT NULL,
+    tag_name   VARCHAR(100) NULL,
+    address    VARCHAR(50) NOT NULL,
+    plc_id     VARCHAR(50) NOT NULL,
+    old_value  INT NULL,
+    new_value  INT NOT NULL,
+    written_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_tag_log_written (written_at),
+    INDEX idx_tag_log_tag (tag_type, tag_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", conn))
+            await ddl.ExecuteNonQueryAsync();
+
+        using var cmd = new MySqlCommand(@"
+INSERT INTO tb_tag_log(tag_type, tag_id, tag_name, address, plc_id, old_value, new_value)
+VALUES (@tagType, @tagId, @tagName, @address, @plcId, @oldValue, @newValue)", conn);
+        cmd.Parameters.AddWithValue("@tagType", tagType);
+        cmd.Parameters.AddWithValue("@tagId", (object?)tagId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@tagName", (object?)tagName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@address", address);
+        cmd.Parameters.AddWithValue("@plcId", plcId);
+        cmd.Parameters.AddWithValue("@oldValue", (object?)oldValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@newValue", newValue);
+        await cmd.ExecuteNonQueryAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[TagLog] 기록 실패(쓰기 자체는 성공): {ex.Message}");
+    }
+}
+
 // GET /api/foldertag/value/by-name?name=TEST42
 //   이름으로 태그를 찾아 현재값을 즉시 반환(PLC 통신 없음, 캐시에서 바로 꺼냄).
 //   같은 이름이 여러 폴더에 있으면 전부 배열로 돌려준다 — 여기서는 조회만 하니 여러 개 나와도
@@ -587,7 +636,7 @@ app.MapGet("/api/foldertag/value/by-address", async (string address, string? plc
 //   이름 → folders_tags에서 plc_id/address/type 조회 → tb_plc에서 접속정보 조회 → 실제 PLC에 값을 쓴다.
 //   실제로 설비에 영향을 주는 동작이니, 이름이 여러 폴더에 걸쳐 있어 태그를 하나로 특정할 수
 //   없으면 후보 목록만 보여주고 실제 쓰기는 거부한다(엉뚱한 태그에 잘못 쓰는 사고 방지).
-app.MapGet("/api/foldertag/write/by-name", async (string name, int value, int? folderId, PlcRepository repo, PlcServiceCache cache) =>
+app.MapGet("/api/foldertag/write/by-name", async (string name, int value, int? folderId, PlcRepository repo, PlcServiceCache cache, LiveTagMonitorService monitor) =>
 {
     string where = "name = @name" + (folderId.HasValue ? " AND folder_id = @folderId" : "");
     var parms = new Dictionary<string, object> { ["@name"] = name };
@@ -626,11 +675,15 @@ app.MapGet("/api/foldertag/write/by-name", async (string name, int value, int? f
         // type 컬럼이 실수로 잘못 입력돼 있어도 엉뚱한 방식으로 쓰지 않도록.
         bool isBit = "MLXYBS".Contains(parsed.Value.Device, StringComparison.OrdinalIgnoreCase);
 
+        // 이전 값은 폴링이 이미 메모리에 들고 있는 것을 그대로 쓴다(추가 PLC 통신 없음).
+        monitor.FolderTagValues.TryGetValue(tag.Id, out var oldRaw);
+
         if (isBit)
             await svc.WriteBitAsync(parsed.Value.Addr, value != 0, parsed.Value.Device);
         else
             await svc.WriteWordAsync(parsed.Value.Addr, value, parsed.Value.Device);
 
+        await LogTagWriteAsync(repo.ConnectionString, "FOLDER", tag.Id, name, tag.Address, tag.PlcId, oldRaw, value);
         return Results.Ok(new { success = true, name, plcId = tag.PlcId, address = tag.Address, type = isBit ? "BIT" : "WORD", value });
     }
     catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
@@ -640,7 +693,7 @@ app.MapGet("/api/foldertag/write/by-name", async (string name, int value, int? f
 //   folders_tags를 아예 거치지 않고 plc_id+주소만으로 직접 쓴다 — 그 주소가 태그로 등록돼
 //   있는지와 무관하게 동작한다(device 생략 시 address 접두문자로 추정, 그것도 없으면 "D").
 //   태그 이름이 아니라 "이 PLC의 이 번지"를 확실히 알고 있을 때 쓰는 경로.
-app.MapGet("/api/foldertag/write/by-address", async (string plcId, string address, int value, string? device, PlcRepository repo, PlcServiceCache cache) =>
+app.MapGet("/api/foldertag/write/by-address", async (string plcId, string address, int value, string? device, PlcRepository repo, PlcServiceCache cache, LiveTagMonitorService monitor) =>
 {
     var cfg = await repo.GetByIdAsync(plcId);
     if (cfg == null) return Results.Ok(new { success = false, error = $"tb_plc에 '{plcId}'가 없음" });
@@ -658,6 +711,27 @@ app.MapGet("/api/foldertag/write/by-address", async (string plcId, string addres
             await svc.WriteBitAsync(parsed.Value.Addr, value != 0, dev);
         else
             await svc.WriteWordAsync(parsed.Value.Addr, value, dev);
+
+        // 이 plcId+address가 등록된 알람 태그인지 찾아서(있으면) 이름/이전값도 같이 남긴다
+        // (이 엔드포인트는 태그 등록 여부와 무관하게 동작하므로, 못 찾으면 주소만 기록한다).
+        int? logTagId = null; string? logTagName = null; int? oldValue = null;
+        using (var connLookup = new MySqlConnection(repo.ConnectionString))
+        {
+            await connLookup.OpenAsync();
+            using var cmdLookup = new MySqlCommand(
+                "SELECT tag_id, tag_name FROM tb_alarm_tag WHERE plc_id=@p AND address=@a LIMIT 1", connLookup);
+            cmdLookup.Parameters.AddWithValue("@p", plcId);
+            cmdLookup.Parameters.AddWithValue("@a", address);
+            using var rd = await cmdLookup.ExecuteReaderAsync();
+            if (await rd.ReadAsync())
+            {
+                logTagId = rd.GetInt32(0);
+                logTagName = rd.GetString(1);
+            }
+        }
+        if (logTagId.HasValue && monitor.AlarmTagValues.TryGetValue(logTagId.Value, out var wasOn))
+            oldValue = wasOn ? 1 : 0;
+        await LogTagWriteAsync(repo.ConnectionString, logTagId.HasValue ? "ALARM" : "ADDRESS", logTagId, logTagName, address, plcId, oldValue, value);
 
         return Results.Ok(new { success = true, plcId, address, device = dev, type = isBit ? "BIT" : "WORD", value });
     }

@@ -1,14 +1,14 @@
 namespace PlcApiServer.Logging;
 
 /// <summary>
-/// D:\SC_LOG\YYYYMMDD.log 에 스타트/무브/엔드 신호 로그를 기록한다.
+/// D:\SC_LOG\YYYYMMDD.log 에 로그를 기록한다. 현재는 PlcService의 통신 재연결/실패 기록("COMM" 태그)용으로 쓰인다.
 /// </summary>
 public static class ScFileLogger
 {
     private static readonly string LogDir = @"D:\SC_LOG";
     private static readonly object _lock  = new();
 
-    /// <param name="tag">START / MOVE / END</param>
+    /// <param name="tag">로그 분류 태그 (예: "COMM")</param>
     /// <param name="message">한 줄 메시지</param>
     public static void Write(string tag, string message)
     {

@@ -44,14 +44,6 @@ public partial class PlcService
     // 이 PLC 인스턴스에 대한 요청 직렬화 락 — 동시에 여러 요청이 같은 TCP 연결을 건드리지 않도록 보장
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    // ── 우선순위 힌트: START/END/MOVE 서비스가 읽기 직전에 증가, 완료 후 감소 ──
-    // (현재 해당 서비스들은 비활성화 상태지만, AlarmMonitorService 등 다른 폴러가
-    //  이 힌트를 보고 자리를 양보하도록 설계된 값이라 그대로 유지)
-    private int _priorityWaiting = 0;
-    public void IncrementPriority() => Interlocked.Increment(ref _priorityWaiting);
-    public void DecrementPriority() => Interlocked.Decrement(ref _priorityWaiting);
-    public bool HasPriorityWaiting => Volatile.Read(ref _priorityWaiting) > 0;
-
     // 이 PLC와 마지막으로 통신에 성공한 시각(UTC). Program.cs의 /api/plc/ping·/ping/{id}·/status-all이
     // 새 TCP 연결 없이 "최근에 정상 통신했는지"만 빠르게 확인할 때 사용한다.
     public DateTime? LastSuccessAt { get; private set; }

@@ -10,30 +10,119 @@
 
 <header class="topbar">
   <div class="topbar-title">
-    <span class="topbar-icon">⛭</span>
+    <span class="topbar-icon">
+      <svg class="icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9.5 7V4M14.5 7V4M9.5 20v-3M14.5 20v-3M7 9.5H4M7 14.5H4M20 9.5h-3M20 14.5h-3"/></svg>
+    </span>
     <div>
       <h1>PLC 태그 관리</h1>
       <p class="topbar-sub">PLC 연결 · 모니터링 태그 · 온도 태그 · 알람 태그의 정의(이름/주소/PLC)를 관리합니다</p>
     </div>
   </div>
   <nav class="tabnav">
-    <button class="tab-btn" data-tab="plc">🔌 PLC 관리</button>
-    <button class="tab-btn is-active" data-tab="folder">📡 모니터링 태그</button>
-    <button class="tab-btn" data-tab="temp">🌡 온도 태그</button>
-    <button class="tab-btn" data-tab="alarm">🔔 알람 태그</button>
-    <button class="tab-btn" data-tab="monitor">📊 실시간 모니터링</button>
+    <button class="tab-btn is-active" data-tab="plc">
+      <svg class="icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9.5 7V4M14.5 7V4M9.5 20v-3M14.5 20v-3M7 9.5H4M7 14.5H4M20 9.5h-3M20 14.5h-3"/></svg>
+      PLC 관리
+    </button>
+    <button class="tab-btn" data-tab="folder">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 13.4V19M9.5 19h5"/></svg>
+      모니터링 태그
+    </button>
+    <button class="tab-btn" data-tab="temp">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg>
+      온도 태그
+    </button>
+    <button class="tab-btn" data-tab="alarm">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>
+      알람 태그
+    </button>
+    <button class="tab-btn" data-tab="monitor">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3.5l2-6 4 12 2-9 1.5 3H21"/></svg>
+      실시간 모니터링
+    </button>
   </nav>
 </header>
 
 <main class="app">
 
   <!-- ============================= PLC 관리 (tb_plc) ============================= -->
-  <section id="tab-plc" class="tab-panel">
-    <div class="content">
+  <section id="tab-plc" class="tab-panel is-active">
+    <div class="poll-status-panel">
+      <div class="poll-panel-head">
+        <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3.5l2-6 4 12 2-9 1.5 3H21"/></svg> 실제 폴링 상황</span>
+        <span class="live-indicator"><span class="live-dot"></span><span id="pollStatusUpdatedAt">-</span></span>
+      </div>
+
+      <div class="poll-cards-row">
+        <div class="poll-card">
+          <div class="poll-card-head">
+            <span class="poll-card-title"><svg class="icon" viewBox="0 0 24 24"><path d="M9 15 15 9M10 6l1-1a4 4 0 0 1 5.5 5.5l-1 1M14 18l-1 1A4 4 0 0 1 7.5 13.5l1-1"/></svg> 알람 + 폴더 태그</span>
+            <span class="table-tag">LiveTagMonitorService</span>
+          </div>
+          <div class="poll-card-stat">
+            <span class="poll-stat-value" id="pollLiveDuration">-</span>
+            <span class="poll-stat-label">최근 한 바퀴 소요시간</span>
+          </div>
+          <div class="poll-card-meta">
+            <span class="poll-interval-badge" id="pollLiveInterval">주기 -</span>
+            <span class="poll-last-at" id="pollLiveLastAt">-</span>
+          </div>
+          <div class="poll-chart-wrap"><canvas id="pollLiveChart"></canvas></div>
+          <div class="poll-group-list" id="pollLiveGroups"></div>
+        </div>
+
+        <div class="poll-card">
+          <div class="poll-card-head">
+            <span class="poll-card-title"><svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg> 온도 태그</span>
+            <span class="table-tag">TempMonitorService</span>
+          </div>
+          <div class="poll-card-stat">
+            <span class="poll-stat-value" id="pollTempDuration">-</span>
+            <span class="poll-stat-label">최근 한 바퀴 소요시간</span>
+          </div>
+          <div class="poll-card-meta">
+            <span class="poll-interval-badge" id="pollTempInterval">주기 -</span>
+            <span class="poll-last-at" id="pollTempLastAt">-</span>
+          </div>
+          <div class="poll-chart-wrap"><canvas id="pollTempChart"></canvas></div>
+          <div class="poll-group-list" id="pollTempGroups"></div>
+        </div>
+      </div>
+
+      <div class="poll-bottom-row">
+        <div class="poll-failure-strip is-ok" id="pollFailureStrip">
+          <div class="poll-failure-strip-head" id="pollFailureStripLabel"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12.5 9.5 17 19 7"/></svg> 최근 실패 없음</div>
+          <div class="poll-failure-list" id="pollFailureList"></div>
+        </div>
+
+        <div class="poll-diagnosis-panel">
+          <div class="poll-diagnosis-head">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><rect x="6" y="6" width="12" height="15" rx="1.5"/><path d="M9 12h6M9 15.5h6M9 18.5h3.5"/></svg> 진단 메모
+            <button type="button" class="btn-link" id="pollAiAskBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="3"/></svg> AI로 분석</button>
+          </div>
+          <div class="poll-diagnosis-body" id="pollDiagnosisBody">분석 중...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-panel">
+      <div class="chat-panel-head">
+        <span><svg class="icon" viewBox="0 0 24 24"><path d="M4 5.5h16v10H9l-4 3.5v-3.5H4Z"/></svg> AI 어시스턴트</span>
+        <span class="chat-panel-sub">태그 조회 · 값 쓰기 · 온도 태그 추가를 말로 요청해보세요 (로컬 AI · qwen2.5:3b)</span>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="chat-empty" id="chatEmpty">예: "PLC 목록 보여줘" · "name_4 태그 값 알려줘" · "온도 태그 목록 보여줘"</div>
+      </div>
+      <form class="chat-input-row" id="chatForm">
+        <input type="text" id="chatInput" placeholder="무엇을 도와드릴까요?" autocomplete="off">
+        <button type="submit" class="btn btn-primary" id="chatSendBtn">전송</button>
+      </form>
+    </div>
+
+    <div class="content plc-list-col">
       <div class="toolbar">
         <div class="toolbar-title">PLC 목록 <span class="table-tag">tb_plc</span></div>
         <div class="search-box">
-          <span class="search-icon">⌕</span>
+          <span class="search-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
           <input type="search" class="search-input" id="plcSearch" placeholder="PLC ID · 이름 · IP로 검색">
         </div>
         <span class="count-badge" id="plcCount"></span>
@@ -63,7 +152,7 @@
   </section>
 
   <!-- ============================= 모니터링 태그 (folders_tags) ============================= -->
-  <section id="tab-folder" class="tab-panel is-active">
+  <section id="tab-folder" class="tab-panel">
     <aside class="sidebar">
       <div class="sidebar-head">
         <span>폴더 <span class="table-tag">folders</span></span>
@@ -75,19 +164,19 @@
       <div class="toolbar">
         <div class="toolbar-title" id="folderTagsTitle">전체 모니터링 태그 <span class="table-tag">folders_tags</span></div>
         <div class="search-box">
-          <span class="search-icon">⌕</span>
+          <span class="search-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
           <input type="search" class="search-input" id="folderTagSearch" placeholder="태그이름 · 주소로 검색">
         </div>
         <span class="count-badge" id="folderTagCount"></span>
         <div class="toolbar-spacer"></div>
-        <a class="btn btn-ghost" id="folderTagExportBtn" href="/api/admin/foldertags/export">⬇ 엑셀 다운로드</a>
-        <button class="btn btn-ghost" id="folderTagImportBtn">⬆ 엑셀 업로드</button>
+        <a class="btn btn-ghost" id="folderTagExportBtn" href="/api/admin/foldertags/export"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19.5h14"/></svg> 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="folderTagImportBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 20V9"/><path d="M7.5 13.5 12 9l4.5 4.5"/><path d="M5 19.5h14"/></svg> 엑셀 업로드</button>
         <input type="file" id="folderTagImportFile" accept=".xlsx" hidden>
         <button class="btn btn-primary" id="folderTagAddBtn">+ 새 태그</button>
       </div>
 
       <details class="docs">
-        <summary>ℹ️ 이 태그, 나중에 어떻게 가져다 쓰나요? (URL 사용법)</summary>
+        <summary><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg> 이 태그, 나중에 어떻게 가져다 쓰나요? (URL 사용법)</summary>
         <div class="docs-body">
           <p><strong>동작 방식</strong> — 서버가 2초마다 이 폴더의 모든 태그를 PLC에서 미리 읽어 메모리에 들고 있습니다. 아래 URL을 호출하면 PLC와 통신하지 않고 <em>메모리에 있는 최신값을 즉시</em> 돌려줍니다.</p>
 
@@ -144,21 +233,21 @@
     </aside>
     <div class="content">
       <div class="toolbar">
-        <div class="toolbar-title" id="tempTagsTitle">전체 온도 태그 <span class="table-tag">tb_temp_tag</span></div>
+        <div class="toolbar-title" id="tempTagsTitle"><svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg> 전체 온도 태그 <span class="table-tag">tb_temp_tag</span></div>
         <div class="search-box">
-          <span class="search-icon">⌕</span>
+          <span class="search-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
           <input type="search" class="search-input" id="tempTagSearch" placeholder="태그이름 · 주소로 검색">
         </div>
         <span class="count-badge" id="tempTagCount"></span>
         <div class="toolbar-spacer"></div>
-        <a class="btn btn-ghost" id="tempTagExportBtn" href="/api/admin/temptags/export">⬇ 엑셀 다운로드</a>
-        <button class="btn btn-ghost" id="tempTagImportBtn">⬆ 엑셀 업로드</button>
+        <a class="btn btn-ghost" id="tempTagExportBtn" href="/api/admin/temptags/export"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19.5h14"/></svg> 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="tempTagImportBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 20V9"/><path d="M7.5 13.5 12 9l4.5 4.5"/><path d="M5 19.5h14"/></svg> 엑셀 업로드</button>
         <input type="file" id="tempTagImportFile" accept=".xlsx" hidden>
         <button class="btn btn-primary" id="tempTagAddBtn">+ 새 태그</button>
       </div>
 
       <details class="docs">
-        <summary>ℹ️ 온도 태그를 저장하면 무슨 일이 생기나요? (tb_temp_snapshot 설명)</summary>
+        <summary><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg> 온도 태그를 저장하면 무슨 일이 생기나요? (tb_temp_snapshot 설명)</summary>
         <div class="docs-body">
           <p><strong>동작 방식</strong> — 온도 태그 1개 = <code>tb_temp_snapshot</code> 테이블의 컬럼 1개입니다. 태그를 저장하는 즉시 <code>col_name</code> 이름으로 컬럼이 생성되고(이미 있으면 건너뜀), 이후 서버가 <b>30초마다</b> 이 태그가 속한 PLC에서 실제 값을 읽어 <code>scale</code> 보정식을 적용한 뒤 스냅샷 한 행으로 저장합니다. 즉 한 "행"에 그 시각 모든 온도 태그의 값이 컬럼별로 나란히 쌓입니다.</p>
 
@@ -219,19 +308,19 @@
       <div class="toolbar">
         <div class="toolbar-title" id="alarmTagsTitle">전체 알람 태그 <span class="table-tag">tb_alarm_tag</span></div>
         <div class="search-box">
-          <span class="search-icon">⌕</span>
+          <span class="search-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
           <input type="search" class="search-input" id="alarmTagSearch" placeholder="태그이름 · 주소 · 알람메시지로 검색">
         </div>
         <span class="count-badge" id="alarmTagCount"></span>
         <div class="toolbar-spacer"></div>
-        <a class="btn btn-ghost" id="alarmTagExportBtn" href="/api/admin/alarmtags/export">⬇ 엑셀 다운로드</a>
-        <button class="btn btn-ghost" id="alarmTagImportBtn">⬆ 엑셀 업로드</button>
+        <a class="btn btn-ghost" id="alarmTagExportBtn" href="/api/admin/alarmtags/export"><svg class="icon" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19.5h14"/></svg> 엑셀 다운로드</a>
+        <button class="btn btn-ghost" id="alarmTagImportBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 20V9"/><path d="M7.5 13.5 12 9l4.5 4.5"/><path d="M5 19.5h14"/></svg> 엑셀 업로드</button>
         <input type="file" id="alarmTagImportFile" accept=".xlsx" hidden>
         <button class="btn btn-primary" id="alarmTagAddBtn">+ 새 태그</button>
       </div>
 
       <details class="docs">
-        <summary>ℹ️ 알람 태그는 어떻게 동작하나요?</summary>
+        <summary><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg> 알람 태그는 어떻게 동작하나요?</summary>
         <div class="docs-body">
           <p><strong>동작 방식</strong> — 서버가 2초마다 이 태그의 PLC 주소를 읽어, 값이 <b>OFF→ON 또는 ON→OFF로 전환되는 순간에만</b> <code>tb_alarm_history</code> 테이블에 이력을 1건 기록합니다(값이 그대로 유지되는 동안은 기록하지 않음). 레벨은 알람 심각도를 화면에서 구분하기 위한 숫자입니다(값이 클수록 심각하다는 식의 규칙은 이 화면을 쓰는 쪽에서 정하면 됩니다).</p>
           <p class="docs-note">⚠️ 현재 알람의 실시간 상태나 이력을 바로 조회하는 URL API는 아직 없습니다 — 필요하시면 <code>tb_alarm_history</code> 테이블을 직접 조회하거나, 별도로 조회 API 추가를 요청해주세요. 이 화면은 태그 <b>정의</b>(이름/주소/메시지)만 관리합니다.</p>
@@ -264,15 +353,25 @@
   <section id="tab-monitor" class="tab-panel">
     <div class="content">
       <nav class="subtabnav">
-        <button class="subtab-btn is-active" data-subtab="mon-folder">📡 모니터링 태그</button>
-        <button class="subtab-btn" data-subtab="mon-alarm">🔔 알람 태그</button>
-        <button class="subtab-btn" data-subtab="mon-temp">🌡 온도 트렌드</button>
+        <button class="subtab-btn is-active" data-subtab="mon-folder"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 13.4V19M9.5 19h5"/></svg> 모니터링 태그</button>
+        <button class="subtab-btn" data-subtab="mon-alarm"><svg class="icon" viewBox="0 0 24 24"><path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> 알람 태그</button>
+        <button class="subtab-btn" data-subtab="mon-temp"><svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg> 온도 트렌드</button>
       </nav>
 
       <!-- 모니터링 태그 현재값 -->
       <div id="submon-folder" class="subtab-panel is-active">
         <div class="toolbar">
           <div class="toolbar-title">실시간 값 <span class="table-tag">메모리(FolderTagValues)</span></div>
+          <details class="info-toggle">
+            <summary>ⓘ</summary>
+            <div class="info-box">
+              <b>LiveTagMonitorService</b>가 2초(PlcMonitor:IntervalMs)마다 폴더 태그 주소를 읽어 이 값을
+              메모리(FolderTagValues)에만 저장합니다 — PLC에 매번 새로 요청하지 않고 그 메모리 값을 그대로 보여줍니다.
+              같은 서비스가 <b>알람 태그도 함께</b> 폴링해서, 같은 PLC·같은 디바이스면 한 번의 PLC 요청으로 묶어
+              읽습니다(PLC 통신 횟수 절감). 태그 목록 자체(추가/삭제/주소 변경)는 30초(TagCacheMs)마다 다시 불러옵니다.
+              PLC 관리 화면에서 실제 폴링 그룹·소요 시간을 볼 수 있습니다.
+            </div>
+          </details>
           <select id="monFolderSelect" class="filter-select"><option value="ALL">전체 폴더</option></select>
           <span class="count-badge" id="monFolderCount"></span>
           <div class="toolbar-spacer"></div>
@@ -288,7 +387,7 @@
           </div>
 
           <div class="write-panel" id="writePanel">
-            <div class="write-panel-head">📝 값 쓰기</div>
+            <div class="write-panel-head"><svg class="icon" viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.83l-1.17-1.17a2 2 0 0 0-2.83 0L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg> 값 쓰기</div>
             <div id="writePanelEmpty" class="write-panel-empty">왼쪽 표에서 태그 행을 클릭해 선택하세요 (Shift·Ctrl로 다중선택)</div>
             <form id="writePanelForm" hidden>
               <div class="write-sel-count" id="writeSelCount">-</div>
@@ -298,6 +397,10 @@
                 <button type="submit" class="btn btn-primary" id="writeSubmitBtn">쓰기</button>
               </div>
             </form>
+            <div class="write-log">
+              <div class="write-log-head">최근 값 변경 이력 <span class="table-tag">tb_tag_log</span></div>
+              <div class="write-log-list" id="writeLogList"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -306,6 +409,16 @@
       <div id="submon-alarm" class="subtab-panel">
         <div class="toolbar">
           <div class="toolbar-title">실시간 상태 <span class="table-tag">메모리(AlarmTagValues)</span></div>
+          <details class="info-toggle">
+            <summary>ⓘ</summary>
+            <div class="info-box">
+              모니터링 태그와 같은 <b>LiveTagMonitorService</b>가 2초(PlcMonitor:IntervalMs)마다 함께 폴링합니다 —
+              PLC·디바이스가 같으면 모니터링 태그와 한 번의 PLC 요청으로 묶여서 읽힙니다. 다만 기록 방식은 다릅니다:
+              현재 상태(ON/OFF)는 매 폴링마다 갱신되는 메모리 값(AlarmTagValues)을 그대로 보여주고,
+              <b>값이 실제로 전환(OFF→ON 또는 ON→OFF)된 순간에만</b> tb_alarm_history에 발생/해제 이력이 남습니다.
+              PLC 하나가 응답 없어도 다른 PLC의 알람 감지는 지연되지 않도록 PLC별로 즉시 처리합니다.
+            </div>
+          </details>
           <select id="monAlarmFolderSelect" class="filter-select"><option value="ALL">전체 폴더</option></select>
           <span class="count-badge" id="monAlarmCount"></span>
           <span class="alarm-sel-ctrl">
@@ -323,10 +436,27 @@
       <!-- 온도 태그 트렌드 -->
       <div id="submon-temp" class="subtab-panel">
         <div class="toolbar">
-          <div class="toolbar-title">온도 트렌드 <span class="table-tag">tb_temp_snapshot 최근 60분</span></div>
+          <div class="toolbar-title">온도 트렌드 <span class="table-tag" id="monTempRangeLabel">tb_temp_snapshot 최근 6시간</span></div>
+          <details class="info-toggle">
+            <summary>ⓘ</summary>
+            <div class="info-box">
+              온도 태그는 <b>TempMonitorService</b>가 30초(TempMonitor:IntervalMs)마다, 매 정각·30초 경계
+              (예: 12:00:00, 12:00:30)에 맞춰 PLC 값을 읽어 <code>tb_temp_snapshot</code>에 스냅샷 한 행으로 저장합니다.
+              이 화면은 그 스냅샷 테이블을 선택한 기간만큼 다시 읽어 그래프로 그린 것으로, PLC와 직접 통신하지 않습니다.
+              화면 자체는 로드 후 1분마다 비동기로 다시 불러옵니다.
+            </div>
+          </details>
           <select id="monTempEquipSelect" class="filter-select"><option value="">전체 설비</option></select>
+          <div class="range-btn-group" id="monTempRangeGroup">
+            <button type="button" class="range-btn" data-mins="60">1시간</button>
+            <button type="button" class="range-btn" data-mins="180">3시간</button>
+            <button type="button" class="range-btn is-active" data-mins="360">6시간</button>
+            <button type="button" class="range-btn" data-mins="1440">24시간</button>
+            <button type="button" class="range-btn" data-mins="4320">3일</button>
+            <button type="button" class="range-btn" data-mins="10080">7일</button>
+          </div>
           <span class="count-badge" id="monTempCount"></span>
-          <button type="button" class="btn btn-ghost" id="monTempRefreshBtn">🔄 새로고침</button>
+          <button type="button" class="btn btn-ghost" id="monTempRefreshBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.1-5"/><path d="M19 4.5V9h-4.5"/></svg> 새로고침</button>
           <div class="toolbar-spacer"></div>
           <span class="live-indicator"><span class="live-dot"></span><span id="monTempUpdatedAt">-</span></span>
         </div>

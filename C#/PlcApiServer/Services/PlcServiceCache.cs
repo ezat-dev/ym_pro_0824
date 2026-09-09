@@ -35,10 +35,6 @@ public sealed class PlcServiceCache
     // ── 주 맵: "ip:port" → CacheItem (물리 엔드포인트 당 TCP 연결 1개 보장) ──
     private readonly ConcurrentDictionary<string, CacheItem> _byEndpoint = new();
 
-    // ── 알람 전용 맵: AlarmMonitorService 전용 분리 연결 ──────────────────────
-    // Start/Move/End 서비스의 락을 점유하지 않도록 별도 PlcService 인스턴스 유지
-    private readonly ConcurrentDictionary<string, CacheItem> _alarmByEndpoint = new();
-
     // ── 역방향 맵: plcId → "ip:port" (Remove(id) 지원용) ──────────────────
     private readonly ConcurrentDictionary<string, string> _idToEndpoint =
         new(StringComparer.OrdinalIgnoreCase);
@@ -82,21 +78,6 @@ public sealed class PlcServiceCache
     }
 
     /// <summary>
-    /// AlarmMonitorService 전용 PlcService 인스턴스 반환.
-    /// Start/Move/End 서비스와 락을 공유하지 않는 별도 TCP 연결을 사용한다.
-    /// </summary>
-    public PlcService GetOrCreateAlarm(PlcConfigRow cfg)
-    {
-        string epKey = EndpointKey(cfg);
-        var item = _alarmByEndpoint.AddOrUpdate(
-            epKey,
-            _ => CacheItem.Create(cfg),
-            (_, existing) => existing.Update(cfg)
-        );
-        return item.Service;
-    }
-
-    /// <summary>
     /// 새 연결/생성 없이 캐시에 이미 있는 PlcService만 조회한다 (없으면 null).
     /// Program.cs의 /api/plc/status-all이 다수 PLC 상태를 조회할 때, TCP 연결을 새로 만들지
     /// 않기 위해 이 메서드를 사용한다 (읽기 전용 조회, PLC에 부담을 주지 않음).
@@ -121,10 +102,7 @@ public sealed class PlcServiceCache
             if (v == epKey) { stillUsed = true; break; }
         }
         if (!stillUsed)
-        {
             _byEndpoint.TryRemove(epKey, out _);
-            _alarmByEndpoint.TryRemove(epKey, out _);
-        }
     }
 
     // ip:port 하나에 대응하는 PlcService 인스턴스 + 마지막으로 반영된 설정(cfg)을 함께 보관하는 내부 컨테이너
