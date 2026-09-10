@@ -208,13 +208,16 @@ SELECT t.temp_id, t.tag_name, t.address, t.col_name, t.scale,
                 continue;
             }
 
-            int? addr = ParseAddress(tag.Address);
-            if (addr == null)
+            // LiveTagMonitorService(알람/폴더 태그)와 동일한 파서를 재사용 — 주소 앞글자(D/M/X/Y/...)를
+            // 그대로 디바이스로 인식한다. 예전엔 앞글자를 버리고 숫자만 남겨 항상 D로 읽었었다.
+            var parsed = LiveTagMonitorService.ParseAddressFull(tag.Address);
+            if (parsed == null)
             {
                 _logger.LogWarning("Skip temp tag {TempId} invalid address: {Address}", tag.TempId, tag.Address);
                 continue;
             }
-            tag.AddressValue = addr.Value;
+            tag.DeviceType   = parsed.Value.Device;
+            tag.AddressValue = parsed.Value.Addr;
             validTags.Add(tag);
         }
 
@@ -233,25 +236,34 @@ SELECT t.temp_id, t.tag_name, t.address, t.col_name, t.scale,
                 try
                 {
                     var svc = _cache.GetOrCreate(plc);   // PlcServiceCache → 이 PLC 전용 PlcService(TCP 연결) 획득
+                    var results = new List<(string ColName, int? Val)>();
 
-                    var addrList = group.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
-                    var chunks   = BuildChunks(addrList, chunkSize);
-
-                    // ── 실제 PLC와의 TCP 통신이 일어나는 지점 ──
-                    // 청크 전체를 "연결 1개"로 순서대로 읽는다 (AlarmMonitorService와 동일한 이유).
-                    var localMap = await svc.ReadWordsBatchAsync(chunks, "D", (start, count, ex) =>
+                    // 알람/폴더 태그와 동일하게 디바이스(D/M/X/Y/...)별로 나눠서 각자 청크를 만들어 읽는다 —
+                    // 온도 태그도 더 이상 D 레지스터에 한정되지 않는다.
+                    foreach (var devGroup in group.GroupBy(t => t.DeviceType))
                     {
-                        _logger.LogWarning(ex,
-                            "Temp PLC read failed. PlcId={PlcId}, Start={Start}, Count={Count}",
-                            plc.Id, start, count);
-                        RecordFailure(plc.Id, "D", $"D{start}~{start + count - 1} 읽기 실패: {ex.Message}");
-                    });
+                        string deviceType = devGroup.Key;
+                        var addrList = devGroup.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
+                        var chunks   = BuildChunks(addrList, chunkSize);
 
-                    return group.Select(tag =>
-                    {
-                        int? val = localMap.TryGetValue(tag.AddressValue, out var raw) ? raw : (int?)null;
-                        return (tag.ColName, val);
-                    }).ToList();
+                        // ── 실제 PLC와의 TCP 통신이 일어나는 지점 ──
+                        // 청크 전체를 "연결 1개"로 순서대로 읽는다 (AlarmMonitorService와 동일한 이유).
+                        var localMap = await svc.ReadWordsBatchAsync(chunks, deviceType, (start, count, ex) =>
+                        {
+                            _logger.LogWarning(ex,
+                                "Temp PLC read failed. PlcId={PlcId}, Device={Device}, Start={Start}, Count={Count}",
+                                plc.Id, deviceType, start, count);
+                            RecordFailure(plc.Id, deviceType, $"{deviceType}{start}~{start + count - 1} 읽기 실패: {ex.Message}");
+                        });
+
+                        foreach (var tag in devGroup)
+                        {
+                            int? val = localMap.TryGetValue(tag.AddressValue, out var raw) ? raw : (int?)null;
+                            results.Add((tag.ColName, val));
+                        }
+                    }
+
+                    return results;
                 }
                 catch (Exception ex)
                 {
@@ -379,33 +391,6 @@ CREATE TABLE IF NOT EXISTS tb_temp_snapshot (
         return result;
     }
 
-    // 주소 문자열(D201, M7000, 0xC9 등)에서 디바이스 접두어를 떼고 숫자 주소만 뽑는다.
-    // AlarmMonitorService.ParseAddressFull과 달리 여기서는 디바이스 접두어 자체는 버리고
-    // 숫자만 쓴다 — TempMonitorService는 항상 ReadWordsAsync(device 파라미터 없이, 기본값 "D")로만
-    // 읽기 때문에, 애초에 D 레지스터 태그만 등록해서 쓰는 것을 전제로 한다.
-    private static int? ParseAddress(string? address)
-    {
-        if (string.IsNullOrWhiteSpace(address)) return null;
-        address = address.Trim();
-
-        // 0x hex 표기 (예: 0xC9 → 201, 0x82 → 130)
-        if (address.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            if (int.TryParse(address.AsSpan(2),
-                    System.Globalization.NumberStyles.HexNumber, null, out int hex))
-                return hex;
-            return null;
-        }
-
-        // 알파벳 접두어 제거 후 숫자 부분만 파싱 (예: D201 → 201, M7000 → 7000)
-        int i = 0;
-        while (i < address.Length && char.IsLetter(address[i])) i++;
-        string numPart = address[i..];
-        if (int.TryParse(numPart, out var v)) return v;
-
-        return null;
-    }
-
     // DB 조회 결과 1행(온도 태그 1개) + 파싱된 주소값을 함께 담는 내부 전용 모델
     private sealed class TempTagRow
     {
@@ -414,6 +399,7 @@ CREATE TABLE IF NOT EXISTS tb_temp_snapshot (
         public string Address { get; set; } = "";
         public string ColName { get; set; } = "";
         public string? Scale { get; set; }
+        public string DeviceType { get; set; } = "D";
         public int AddressValue { get; set; }
         public PlcConfigRow Plc { get; set; } = null!;
     }

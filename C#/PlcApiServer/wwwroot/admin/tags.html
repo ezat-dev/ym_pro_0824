@@ -191,16 +191,142 @@
   ]
 }</pre>
 
-          <p><strong>② 태그 이름으로 값 하나만 조회</strong> (같은 이름이 여러 폴더에 있으면 배열로 반환)</p>
+          <p><strong>② 태그 이름으로 값 조회</strong> (같은 이름이 여러 폴더에 있으면 <code>tags</code> 배열에 여러 개 담겨서 옴)</p>
           <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/value/by-name?name=태그이름</pre>
+          <pre class="code-block">{
+  "success": true,
+  "count": 1,
+  "tags": [
+    { "id": 326, "folderId": 4, "name": "name_4", "address": "M1020", "plcId": "MST_MITSUBISHI", "value": 0 }
+  ]
+}</pre>
 
-          <p><strong>③ PLC 주소로 직접 조회</strong> (태그로 등록 안 돼 있어도 동작)</p>
+          <p><strong>③ PLC 주소로 직접 조회</strong> (태그로 등록 안 돼 있어도 동작, 응답 형태는 ②와 동일)</p>
           <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/value/by-address?plcId=MST_MITSUBISHI&amp;address=D100</pre>
+          <pre class="code-block">{
+  "success": true,
+  "count": 1,
+  "tags": [
+    { "id": 323, "folderId": 4, "name": "No.1 Zone", "address": "D100", "plcId": "MST_MITSUBISHI", "value": 50531 }
+  ]
+}</pre>
 
           <p><strong>④ 값 쓰기</strong> — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작입니다. 신중하게 사용하세요.</p>
           <pre class="code-block">GET http://&lt;서버IP&gt;:5050/api/foldertag/write/by-name?name=태그이름&amp;value=123</pre>
+          <pre class="code-block">{ "success": true, "name": "name_4", "plcId": "MST_MITSUBISHI", "address": "M1020", "type": "WORD", "value": 123 }</pre>
+          <p class="field-hint">실패 시에는 <code>{ "success": false, "error": "..." }</code>. 같은 이름이 여러 폴더에 걸쳐 있으면 <code>candidates</code> 배열로 후보를 보여주고 쓰기는 거부합니다 — <code>folderId</code>를 같이 지정해서 다시 호출하세요.</p>
 
           <p class="docs-note">위 4개는 이미 서버에 구현되어 있어 지금 바로 호출 가능합니다. 이 관리 화면은 "값"이 아니라 태그 <b>정의</b>(이름/주소/PLC)만 관리합니다.</p>
+        </div>
+      </details>
+
+      <details class="docs">
+        <summary><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg> 위 API, 코드로는 어떻게 호출하나요? (jQuery / Axios 예시)</summary>
+        <div class="docs-body">
+          <p><strong>① 폴더 전체 값 한번에 조회</strong></p>
+          <p><b>jQuery $.ajax</b></p>
+          <pre class="code-block">$.ajax({
+  url: 'http://&lt;서버IP&gt;:5050/api/foldertag/values',
+  method: 'GET',
+  data: { folderId: 4 },
+  dataType: 'json',
+  success: function (res) {
+    if (!res.success) { console.error('조회 실패:', res.error); return; }
+    res.tags.forEach(function (tag) {
+      console.log(tag.name, tag.address, '=', tag.value);
+    });
+  },
+  error: function (xhr, status, err) { console.error('요청 자체 실패:', status, err); }
+});</pre>
+          <p><b>Axios</b></p>
+          <pre class="code-block">async function loadFolderValues(folderId) {
+  try {
+    const { data } = await axios.get('http://&lt;서버IP&gt;:5050/api/foldertag/values', {
+      params: { folderId }
+    });
+    if (!data.success) throw new Error(data.error);
+    return data.tags; // [{ name, address, value }, ...]
+  } catch (err) {
+    console.error('조회 실패:', err.message);
+    return [];
+  }
+}</pre>
+
+          <p><strong>② 태그 이름으로 값 조회</strong> (응답은 항상 <code>{ success, count, tags:[...] }</code> — 같은 이름이 여러 폴더에 있으면 <code>tags</code>에 여러 개가 옴)</p>
+          <p><b>jQuery $.ajax</b></p>
+          <pre class="code-block">$.ajax({
+  url: 'http://&lt;서버IP&gt;:5050/api/foldertag/value/by-name',
+  method: 'GET',
+  data: { name: 'name_4' },
+  dataType: 'json',
+  success: function (res) {
+    if (!res.success) { console.error('조회 실패:', res.error); return; }
+    if (res.count &gt; 1) console.warn(`같은 이름이 ${res.count}개 폴더에 있음`);
+    res.tags.forEach(function (t) {
+      console.log(`[폴더 ${t.folderId}]`, t.name, t.address, '=', t.value);
+    });
+  }
+});</pre>
+          <p><b>Axios</b></p>
+          <pre class="code-block">async function getTagValueByName(name) {
+  const { data } = await axios.get('http://&lt;서버IP&gt;:5050/api/foldertag/value/by-name', {
+    params: { name }
+  });
+  if (!data.success) throw new Error(data.error);
+  return data.tags; // [{ id, folderId, name, address, plcId, value }, ...] — 보통 1개
+}</pre>
+
+          <p><strong>③ PLC 주소로 직접 조회</strong> (태그로 등록 안 돼 있어도 동작, 응답 형태는 ②와 동일)</p>
+          <p><b>jQuery $.ajax</b></p>
+          <pre class="code-block">$.ajax({
+  url: 'http://&lt;서버IP&gt;:5050/api/foldertag/value/by-address',
+  method: 'GET',
+  data: { plcId: 'MST_MITSUBISHI', address: 'D100' },
+  dataType: 'json',
+  success: function (res) {
+    if (!res.success || res.count === 0) { console.error('조회 실패 또는 없음:', res.error); return; }
+    console.log(res.tags[0].plcId, res.tags[0].address, '=', res.tags[0].value);
+  }
+});</pre>
+          <p><b>Axios</b></p>
+          <pre class="code-block">async function getTagValueByAddress(plcId, address) {
+  const { data } = await axios.get('http://&lt;서버IP&gt;:5050/api/foldertag/value/by-address', {
+    params: { plcId, address }
+  });
+  if (!data.success || data.count === 0) throw new Error(data.error ?? '해당 주소의 태그 없음');
+  return data.tags[0].value;
+}</pre>
+
+          <p><strong>④ 값 쓰기</strong> — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작이라, 호출 전 확인창을 넣는 걸 권장합니다.</p>
+          <p><b>jQuery $.ajax</b></p>
+          <pre class="code-block">function writeTagValue(name, value) {
+  if (!confirm(`"${name}" 태그에 값 ${value}을(를) 실제로 쓰시겠습니까?`)) return;
+
+  $.ajax({
+    url: 'http://&lt;서버IP&gt;:5050/api/foldertag/write/by-name',
+    method: 'GET',
+    data: { name: name, value: value },
+    dataType: 'json',
+    success: function (res) {
+      if (!res.success) { alert('쓰기 실패: ' + res.error); return; }
+      alert(`쓰기 성공: ${res.name} (${res.plcId} / ${res.address}) = ${res.value}`);
+    },
+    error: function (xhr, status, err) { alert('요청 자체 실패: ' + err); }
+  });
+}</pre>
+          <p><b>Axios</b></p>
+          <pre class="code-block">async function writeTagValue(name, value) {
+  if (!window.confirm(`"${name}" 태그에 값 ${value}을(를) 실제로 쓰시겠습니까?`)) return;
+
+  const { data } = await axios.get('http://&lt;서버IP&gt;:5050/api/foldertag/write/by-name', {
+    params: { name, value }
+  });
+  if (!data.success) throw new Error(data.error);
+  console.log(`쓰기 성공: ${data.name} (${data.plcId} / ${data.address}) = ${data.value}`);
+  return data; // { success, name, plcId, address, type, value }
+}</pre>
+
+          <p class="docs-note">4개 API 모두 GET이라 axios는 <code>params</code>, jQuery는 <code>data</code> 옵션으로 쿼리스트링을 넘기면 됩니다. HTTP 200이어도 응답 바디의 <code>success: false</code>로 실패를 표현할 수 있으니, <code>error</code>/<code>catch</code> 콜백만 보지 말고 <code>data.success</code>를 항상 먼저 확인하세요.</p>
         </div>
       </details>
 
@@ -255,7 +381,7 @@
             <thead><tr><th>필드</th><th>의미</th></tr></thead>
             <tbody>
               <tr><td>태그 이름</td><td>화면/보고서에 표시할 이름 (예: "No.1 Zone")</td></tr>
-              <tr><td>주소</td><td>PLC 레지스터 주소 (예: D100) — 항상 워드(D) 읽기로 동작</td></tr>
+              <tr><td>주소</td><td>PLC 레지스터 주소, 앞글자로 디바이스를 그대로 인식 (예: D100, M7000, R50)</td></tr>
               <tr><td>컬럼명(col_name)</td><td>tb_temp_snapshot의 실제 컬럼명. 영문/숫자/밑줄만 가능, 저장 시 즉시 컬럼 생성</td></tr>
               <tr><td>트렌드명</td><td>그래프 범례 등에 쓰는 짧은 표시 이름 (예: "1존")</td></tr>
               <tr><td>스케일</td><td>보정식. 맨 앞 1글자가 연산자(+,-,*,/), 나머지가 숫자 (예: "+50", "*0.01"). 비워두면 PLC 원시값 그대로 저장</td></tr>
@@ -536,7 +662,7 @@
     <h2 id="tempTagModalTitle">새 온도 태그</h2>
     <form id="tempTagForm">
       <label>태그 이름 <input type="text" id="ttNameInput" required maxlength="100"></label>
-      <label>주소 <input type="text" id="ttAddressInput" required maxlength="50" placeholder="예: D100"></label>
+      <label>주소 <input type="text" id="ttAddressInput" required maxlength="50" placeholder="예: D100, M100, R50"></label>
       <label>PLC <select id="ttPlcSelect" required></select></label>
       <label>컬럼명(col_name) <input type="text" id="ttColNameInput" required maxlength="64" pattern="[A-Za-z0-9_]+" placeholder="예: zone1_temp"></label>
       <p class="field-hint">※ 영문/숫자/밑줄(_)만 가능. tb_temp_snapshot에 이 이름으로 컬럼이 생성됩니다.</p>
