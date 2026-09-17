@@ -205,6 +205,7 @@ SELECT log_id, tag_type, tag_id, tag_name, address, plc_id, old_value, new_value
                 live = new
                 {
                     intervalMs = liveMonitor.IntervalMs,
+                    chunkSize = liveMonitor.ChunkSize,
                     lastCycleDurationMs = liveMonitor.LastCycleDurationMs,
                     lastPollAt = liveMonitor.LastPollAt,
                     groups = liveMonitor.GetPollGroups(),

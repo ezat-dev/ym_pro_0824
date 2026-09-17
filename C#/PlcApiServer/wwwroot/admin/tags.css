@@ -228,6 +228,9 @@ code, .mono, .code-block{
   padding:2px 9px;font-size:11.5px;color:var(--text-dim);white-space:nowrap;font-variant-numeric:tabular-nums;
 }
 .poll-group-chip b{color:var(--accent-dark);}
+/* 이번 사이클 청크(PLC 왕복) 성공/실패 칩 — 한눈에 색으로 구분되게 */
+.poll-group-chip.is-ok{background:var(--success-soft);border-color:var(--success);color:var(--success);}
+.poll-group-chip.is-fail{background:var(--danger-soft);border-color:var(--danger);color:var(--danger);}
 .poll-group-empty{color:var(--text-faint);font-size:12px;padding:6px 2px;}
 
 /* 실패 목록(좌) : 진단(우) 절반씩 — 화면 좁아지면 위아래로 쌓는다. */
@@ -332,6 +335,8 @@ code, .mono, .code-block{
 .range-btn:hover{color:var(--text);}
 .range-btn.is-active{background:var(--surface);color:var(--accent-dark);box-shadow:var(--shadow);}
 
+.table-tag.is-live{color:var(--success);background:var(--success-soft);}
+.table-tag.is-write{color:var(--warning);background:var(--warning-soft);}
 .table-tag{
   font-family:"SF Mono",Consolas,"D2Coding",monospace;font-size:11px;font-weight:600;
   color:var(--accent-dark);background:var(--accent-soft);padding:2px 7px;border-radius:5px;
@@ -443,6 +448,10 @@ code, .mono, .code-block{
   padding:12px 14px;font-size:12.5px;overflow-x:auto;white-space:pre;color:var(--text);
   margin:6px 0 14px;
 }
+/* 태그별 URL 사용법 모달 전용 — 코드 블록 옆에 복사 버튼을 붙인 줄 */
+.code-block-row{display:flex;align-items:flex-start;gap:8px;margin:6px 0 14px;}
+.code-block-row .code-block{flex:1;margin:0;min-width:0;}
+.code-block-row .copy-url-btn{flex-shrink:0;}
 .docs-note{
   background:var(--warning-soft);color:var(--warning);border-radius:6px;padding:10px 12px;font-size:12.5px;
 }
@@ -463,6 +472,7 @@ code, .mono, .code-block{
   background:var(--surface);border-radius:12px;box-shadow:var(--shadow-lg);
   width:100%;max-width:440px;padding:24px;max-height:90vh;overflow-y:auto;
 }
+.modal-wide{max-width:880px;min-height:560px;max-height:94vh;}
 .modal h2{margin:0 0 16px;font-size:16.5px;}
 .modal form{display:flex;flex-direction:column;gap:14px;}
 .modal label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:600;color:var(--text-dim);}
@@ -603,6 +613,21 @@ code, .mono, .code-block{
 .monitor-split-table{flex:2;min-width:0;}
 .data-table tbody tr.is-write-selected{background:var(--accent-soft);}
 .data-table tbody tr[data-writable]{cursor:pointer;}
+
+/* 모니터링 태그 실시간 값 표 — 태그가 수천~수만 개일 때 한 번에 다 그리면 브라우저가
+   버벅여서(DOM 노드 수 문제), 페이지당 100개씩만 그린다. 위/아래 똑같은 컨트롤을 두고
+   .mon-folder-pager 클래스로 한꺼번에 갱신한다(둘이 항상 같은 상태를 보여줌). */
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;padding:9px 12px;}
+.pagination.is-top{border-bottom:1px solid var(--border-soft);}
+.pagination.is-bottom{border-top:1px solid var(--border-soft);}
+.pagination .btn-icon{padding:4px 7px;}
+.pagination .btn-icon:disabled{opacity:.35;cursor:not-allowed;}
+.pagination-jump{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-dim);white-space:nowrap;font-variant-numeric:tabular-nums;}
+.pagination-page-input{
+  width:46px;text-align:center;font:inherit;padding:4px 2px;border:1px solid var(--border);border-radius:6px;
+  background:var(--surface);color:var(--text);font-size:12.5px;font-variant-numeric:tabular-nums;
+}
+.pagination-page-input:focus{outline:2px solid var(--accent);outline-offset:-1px;}
 
 .write-panel{
   flex:1;min-width:230px;position:sticky;top:14px;

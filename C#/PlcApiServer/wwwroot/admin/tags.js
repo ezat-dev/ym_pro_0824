@@ -85,7 +85,8 @@ const ICON = {
   antenna: '<svg class="icon" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 13.4V19M9.5 19h5"/></svg>',
   folder: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l1.5 2h7A1.5 1.5 0 0 1 19.5 9.5v7A1.5 1.5 0 0 1 18 18H5.5A1.5 1.5 0 0 1 4 16.5v-9Z"/></svg>',
   thermo: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 14.5V5.5a2 2 0 1 0-4 0v9a4 4 0 1 0 4 0Z"/><path d="M10 8h1.5"/></svg>',
-  bell: '<svg class="icon" viewBox="0 0 24 24"><path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>'
+  bell: '<svg class="icon" viewBox="0 0 24 24"><path d="M6 10a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>',
+  info: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg>'
 };
 
 // ── 검색 + 정렬 공용 헬퍼 ───────────────────────────────────────────────────
@@ -330,6 +331,11 @@ let folderTags = [];               // 서버에서 받은 원본
 let folderTagEditId = null;        // null=새로 만들기, 숫자면 그 id를 수정 중
 let folderTagSearch = '';
 const folderTagSort = { key: null, dir: 'asc' };
+// 태그가 수천~수만 개일 때 한 번에 다 그리면 DOM 노드가 너무 많아져 브라우저가 버벅인다(실측:
+// 12,046건일 때 DOM 요소 27만 개) — 페이지당 100개만 그린다. 실시간 모니터링 표(monFolderXxx)와
+// 별개 상태다 — 서로 다른 표라 페이지가 독립적으로 움직여야 한다.
+const FOLDER_TAG_PAGE_SIZE = 100;
+let folderTagPage = 1;
 
 async function loadFolders() {
   const { folders: list } = await api('GET', '/api/admin/folders');
@@ -341,6 +347,7 @@ async function loadFolders() {
 
 async function selectFolder(id) {
   selectedFolderId = id;
+  folderTagPage = 1;   // 다른 폴더로 옮기면 이전 폴더에서 보던 페이지 번호가 의미 없어짐
   const f = id === 'ALL' ? null : folders.find(x => x.id === id);
   document.getElementById('folderTagsTitle').innerHTML =
     (id === 'ALL' ? `${ICON.antenna} 전체 모니터링 태그` : `${ICON.folder} ${escapeHtml(f ? f.name : '')}`) + ' <span class="table-tag">folders_tags</span>';
@@ -395,6 +402,13 @@ function renderFolderTagTable() {
   const empty = document.getElementById('folderTagEmpty');
   const view = filterAndSort(folderTags, folderTagSearch, ['name', 'address'], folderTagSort);
   document.getElementById('folderTagCount').textContent = `총 ${view.length}건` + (view.length !== folderTags.length ? ` (전체 ${folderTags.length}건 중)` : '');
+
+  const totalPages = Math.max(1, Math.ceil(view.length / FOLDER_TAG_PAGE_SIZE));
+  folderTagPage = Math.min(Math.max(1, folderTagPage), totalPages);
+  const startIdx = (folderTagPage - 1) * FOLDER_TAG_PAGE_SIZE;
+  const pageRows = view.slice(startIdx, startIdx + FOLDER_TAG_PAGE_SIZE);
+  updatePagerUI('folder-tag-pager', folderTagPage, totalPages);
+
   if (view.length === 0) {
     body.innerHTML = '';
     empty.hidden = false;
@@ -402,7 +416,7 @@ function renderFolderTagTable() {
     return;
   }
   empty.hidden = true;
-  body.innerHTML = view.map(t => `
+  body.innerHTML = pageRows.map(t => `
     <tr>
       <td class="id-col">${t.id}</td>
       <td class="name-col">${escapeHtml(t.name)}</td>
@@ -412,13 +426,15 @@ function renderFolderTagTable() {
       <td>${escapeHtml(t.type)}</td>
       <td>${badge(t.enabled)}</td>
       <td class="row-actions">
+        <button class="row-icon-btn" data-act="usage" title="URL 사용법">${ICON.info}</button>
         <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
         <button class="row-icon-btn" data-act="dup" title="복제">${ICON.copy}</button>
         <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
       </td>
     </tr>`).join('');
   [...body.children].forEach((tr, i) => {
-    const t = view[i];
+    const t = pageRows[i];
+    tr.querySelector('[data-act=usage]').addEventListener('click', () => openTagUsageModal(t));
     tr.querySelector('[data-act=edit]').addEventListener('click', () => openFolderTagModal(t));
     tr.querySelector('[data-act=dup]').addEventListener('click', () => openFolderTagModal(null, t));
     tr.querySelector('[data-act=del]').addEventListener('click', async () => {
@@ -428,6 +444,116 @@ function renderFolderTagTable() {
     });
   });
 }
+
+// 태그 행 하나(t: {id,name,address,plcId,folderId,type,...})의 실제 값으로 URL 예시를 채운
+// "이 태그, 나중에 어떻게 가져다 쓰나요?" 모달을 연다. origin은 지금 이 화면이 열려 있는
+// 바로 그 서버라, 뜬 URL을 그대로 복사해서 테스트하면 맞게 동작한다.
+function openTagUsageModal(t) {
+  const origin = location.origin;
+  const deviceMatch = String(t.address || '').match(/^[A-Za-z]+/);
+  const device = deviceMatch ? deviceMatch[0].toUpperCase() : '';
+  const numPart = String(t.address || '').replace(/^[A-Za-z]+/, '');
+  // 실제 폴링/쓰기는 folders_tags.type 컬럼을 보지 않고 주소 앞글자만으로 WORD/BIT를 가른다
+  // (PlcService.ReadWordsBatchAsync·Program.cs write 핸들러와 동일한 규칙) — 여기서도 그대로 재현한다.
+  const isBit = /^[MLXYBS]/.test(device);
+  const realType = isBit ? 'BIT' : 'WORD';
+  const typeMismatch = t.type && realType !== String(t.type).toUpperCase();
+
+  // /api/plc/read/{id}는 주소를 그대로 10진수 int로 받는다 — X/Y는 폴링 쪽(ParseAddressFull)이
+  // 8진수/16진수 여부를 판단해 변환한 값을 쓰므로, 그 변환을 여기서 재현하지 않고 X/Y는
+  // 실시간 읽기 예시 자체를 생략한다(잘못된 번지로 안내하는 것을 방지).
+  const canLiveRead = device !== 'X' && device !== 'Y' && /^\d+$/.test(numPart);
+
+  const memTag = '<span class="table-tag">메모리</span>';
+  const liveTag = '<span class="table-tag is-live">실시간</span>';
+  const writeTag = '<span class="table-tag is-write">쓰기</span>';
+
+  document.getElementById('tagUsageModalTitle').textContent = `"${t.name}" — URL 사용법`;
+  document.getElementById('tagUsageBody').innerHTML = `
+    <p><strong>메모리(캐시)</strong>는 서버가 2초마다 미리 읽어둔 값을 그대로 돌려줘서 PLC와 새로 통신하지 않고, <strong>실시간</strong>은 호출하는 그 순간 PLC와 직접 통신합니다. 화면 갱신·반복 호출엔 메모리 쪽을, "지금 이 순간 진짜 값"이 필요할 때만 실시간 쪽을 쓰세요.</p>
+
+    <p><strong>① 이 태그 값 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/foldertag/value/by-name?name=${encodeURIComponent(t.name)}`)}
+
+    <p><strong>② 같은 폴더 태그 전체 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/foldertag/values?folderId=${t.folderId}`)}
+
+    <p><strong>③ PLC 주소로 직접 조회</strong> (이름 대신 PLC+주소로) ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/foldertag/value/by-address?plcId=${encodeURIComponent(t.plcId)}&address=${encodeURIComponent(t.address)}`)}
+
+    <p><strong>④ 지금 이 순간 PLC에서 즉시 읽기</strong> ${liveTag}</p>
+    ${canLiveRead
+      ? codeBlockRow(`${origin}/api/plc/read/${encodeURIComponent(t.plcId)}?start=${numPart}&count=1&device=${device}`)
+      : `<p class="docs-note">이 주소(${escapeHtml(t.address)})는 X/Y 접점이라 8진수/16진수 변환이 필요해 이 화면에서는 실시간 단건 읽기 예시를 생략합니다 — 위 ①~③ 메모리 조회를 이용하세요(내부적으로 변환이 이미 처리되어 값은 정확합니다).</p>`}
+    ${canLiveRead ? '<p class="field-hint">캐시(①~③)보다 최신이지만 PLC와 새로 통신합니다 — 화면에서 몇 초마다 반복 호출하는 용도로는 쓰지 마세요.</p>' : ''}
+
+    <p><strong>⑤ 값 쓰기</strong> ${writeTag} — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작입니다.</p>
+    ${codeBlockRow(`${origin}/api/foldertag/write/by-name?name=${encodeURIComponent(t.name)}&value=${isBit ? 1 : 0}`)}
+    <p class="field-hint">
+      ${isBit ? '이 태그는 BIT로 처리되어 0(OFF) 또는 1(ON)만 의미가 있습니다 — 0이 아닌 값은 전부 ON으로 처리됨.' : '위 value 자리에 원하는 숫자를 넣어 호출하세요.'}
+      이름이 다른 폴더에도 등록돼 있으면 쓰기는 거부되고 후보 목록만 옵니다 — 그때는 <code>&folderId=${t.folderId}</code>를 추가해 다시 호출하세요.
+    </p>
+    ${typeMismatch ? `<p class="docs-note">등록된 타입은 "${escapeHtml(t.type)}"이지만, 주소 앞글자가 "${escapeHtml(device)}"라 실제로는 <b>${realType}</b>로 처리됩니다 — 등록된 타입 값은 참고용일 뿐 실제 통신에는 쓰이지 않습니다.</p>` : ''}
+  `;
+  openModal('tagUsageModalBackdrop');
+}
+
+// URL 한 줄 + 복사 버튼을 담은 코드 블록 HTML을 만든다.
+function codeBlockRow(url) {
+  const id = 'cbUrl' + Math.random().toString(36).slice(2, 9);
+  return `<div class="code-block-row">
+    <pre class="code-block" id="${id}">GET ${escapeHtml(url)}</pre>
+    <button type="button" class="btn btn-sm btn-ghost copy-url-btn" data-target="${id}" data-url="${escapeHtml(url)}">복사</button>
+  </div>`;
+}
+
+// 클립보드 권한이 없는 폐쇄망 환경도 있어(공장 PC), 실패하면 텍스트만 선택해 Ctrl+C로
+// 수동 복사할 수 있게 해둔다 — 어느 쪽이든 버튼을 누르면 결과를 보여준다.
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.copy-url-btn');
+  if (!btn) return;
+  const finish = ok => {
+    const original = '복사';
+    btn.textContent = ok ? '복사됨' : '선택됨';
+    setTimeout(() => { btn.textContent = original; }, 1400);
+  };
+  const selectFallback = () => {
+    const el = document.getElementById(btn.dataset.target);
+    if (!el) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(btn.dataset.url).then(() => finish(true)).catch(() => { selectFallback(); finish(false); });
+  } else {
+    selectFallback();
+    finish(false);
+  }
+});
+
+// ── 공용 페이지네이션 컨트롤 헬퍼 — 표마다 독립된 page 변수를 쓰지만, 위/아래 버튼 배선과
+// 화면 갱신 로직은 동일해서 pagerClass(예: 'folder-tag-pager')로 묶어 재사용한다.
+function wirePager(pagerClass, getPage, setPage, onChange) {
+  document.querySelectorAll('.' + pagerClass).forEach(pager => {
+    pager.querySelector('[data-act=first]').addEventListener('click', () => { setPage(1); onChange(); });
+    pager.querySelector('[data-act=prev]').addEventListener('click', () => { setPage(getPage() - 1); onChange(); });
+    pager.querySelector('[data-act=next]').addEventListener('click', () => { setPage(getPage() + 1); onChange(); });
+    pager.querySelector('[data-act=last]').addEventListener('click', () => { setPage(Infinity); onChange(); });
+    pager.querySelector('.pagination-page-input').addEventListener('change', e => { setPage(Number(e.target.value)); onChange(); });
+  });
+}
+function updatePagerUI(pagerClass, page, totalPages) {
+  document.querySelectorAll(`.${pagerClass} .pager-total-pages`).forEach(el => el.textContent = totalPages);
+  document.querySelectorAll(`.${pagerClass} .pagination-page-input`).forEach(el => {
+    if (document.activeElement !== el) el.value = page;
+  });
+  document.querySelectorAll(`.${pagerClass} [data-act=first], .${pagerClass} [data-act=prev]`).forEach(b => b.disabled = page <= 1);
+  document.querySelectorAll(`.${pagerClass} [data-act=next], .${pagerClass} [data-act=last]`).forEach(b => b.disabled = page >= totalPages);
+}
+wirePager('folder-tag-pager', () => folderTagPage, p => { folderTagPage = p; }, renderFolderTagTable);
 
 // editing: 수정 대상 태그(있으면 수정 모드) / dupFrom: 복제 원본(있으면 이름·주소 +1 해서 새로 만들기)
 function openFolderTagModal(editing, dupFrom) {
@@ -491,7 +617,7 @@ document.getElementById('folderForm').addEventListener('submit', async e => {
   } catch (e) { showToast(e.message, 'error'); }
 });
 
-bindLiveSearch('folderTagSearch', () => { folderTagSearch = document.getElementById('folderTagSearch').value; renderFolderTagTable(); });
+bindLiveSearch('folderTagSearch', () => { folderTagSearch = document.getElementById('folderTagSearch').value; folderTagPage = 1; renderFolderTagTable(); });
 
 document.getElementById('folderTagImportBtn').addEventListener('click', () => document.getElementById('folderTagImportFile').click());
 document.getElementById('folderTagImportFile').addEventListener('change', async e => {
@@ -830,13 +956,23 @@ function isPlcTabActive() { return document.getElementById('tab-plc').classList.
 
 // PLC 관리 화면 우측 — 백그라운드 폴링 두 서비스가 실제로 PLC별로 어떻게 묶여서 도는지,
 // 한 바퀴에 몇 ms 걸리는지, 최근 실패가 있었는지를 그대로 보여준다(PLC를 새로 두드리지 않음).
-function pollGroupRowHtml(g) {
+function pollGroupRowHtml(g, chunkSizeConfig) {
+  const chunkTotal = g.chunkTotal || 0;
+  const chunkFail  = g.chunkFail || 0;
+  const chunkOk    = chunkTotal - chunkFail;
+  // chunkTotal은 "태그 개수"가 아니라 "이번 사이클에 실제로 PLC를 왕복한 횟수"다 — 주소가
+  // 얼마나 흩어져 있느냐에 따라 태그 수천 개가 청크 몇십 개로 뭉칠 수도, 수백 개로 쪼개질
+  // 수도 있어서, 눈으로 "2초 안에 몇 번 통신해서 몇 번 다 성공했는지"를 바로 보여준다.
+  const chunkChip = chunkTotal > 0
+    ? `<span class="poll-group-chip ${chunkFail > 0 ? 'is-fail' : 'is-ok'}">청크 ${chunkOk}/${chunkTotal} 성공${chunkFail > 0 ? ` (${chunkFail}건 실패)` : ''}</span>`
+    : '';
   return `
     <div class="poll-group-row">
       <span class="poll-group-plc">${escapeHtml(g.plcLabel)} <span class="write-log-time">(${escapeHtml(g.plcId)})</span></span>
       <span class="poll-group-chip">폴더 <b>${g.folderTagCount}</b>개</span>
       <span class="poll-group-chip">알람 <b>${g.alarmTagCount}</b>개</span>
-      <span class="poll-group-chip">→ 한 번에 <b>${g.folderTagCount + g.alarmTagCount}</b>개 묶어서 읽음</span>
+      <span class="poll-group-chip">폴더+알람 <b>${g.folderTagCount + g.alarmTagCount}</b>개 → 청크당 최대 <b>${chunkSizeConfig}</b>개씩 읽음</span>
+      ${chunkChip}
     </div>`;
 }
 
@@ -898,7 +1034,7 @@ async function refreshPollStatus() {
     renderPollChart('live', 'pollLiveChart', live.durationHistory || []);
     const liveGroups = document.getElementById('pollLiveGroups');
     liveGroups.innerHTML = live.groups.length
-      ? live.groups.map(pollGroupRowHtml).join('')
+      ? live.groups.map(g => pollGroupRowHtml(g, live.chunkSize)).join('')
       : '<div class="poll-group-empty">등록된 폴더/알람 태그가 없습니다.</div>';
 
     document.getElementById('pollTempInterval').textContent = `주기 ${msToSecRound(temp.intervalMs)}`;
@@ -914,7 +1050,14 @@ async function refreshPollStatus() {
     const failureList = document.getElementById('pollFailureList');
     failureStrip.classList.toggle('is-ok', failures.length === 0);
     failureStrip.classList.toggle('is-alert', failures.length > 0);
-    failureLabel.innerHTML = failures.length > 0 ? `${ICON.alertTriangle} 최근 실패 ${failures.length}건` : `${ICON.checkCircle} 최근 실패 없음`;
+    // "최근 실패 없음"만 보면 이번 사이클에 청크(PLC 왕복)가 몇 개나 돌았는지, 그게 진짜 다
+    // 끝났는지 알 수 없다는 피드백 — live.groups 전체를 합산해서 바로 옆에 붙여 보여준다.
+    const chunkTotal = (live.groups || []).reduce((s, g) => s + (g.chunkTotal || 0), 0);
+    const chunkFail  = (live.groups || []).reduce((s, g) => s + (g.chunkFail || 0), 0);
+    const chunkNote = chunkTotal > 0 ? ` · 이번 사이클 청크 ${chunkTotal - chunkFail}/${chunkTotal} 성공` : '';
+    failureLabel.innerHTML = failures.length > 0
+      ? `${ICON.alertTriangle} 최근 실패 ${failures.length}건${chunkNote}`
+      : `${ICON.checkCircle} 최근 실패 없음${chunkNote}`;
     failureList.innerHTML = failures.map(f => `
       <div class="poll-failure-row">
         <div class="poll-failure-meta">${formatUpdatedAt(f.at)} · ${escapeHtml(f.source)} · ${escapeHtml(f.plcId)}${f.device ? ' · ' + escapeHtml(f.device) : ''}</div>
@@ -1230,13 +1373,38 @@ function populateMonitorFolderSelect() {
   sel.innerHTML = '<option value="ALL">전체 폴더</option>' + folders.map(f => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
   sel.value = [...sel.options].some(o => o.value === current) ? current : 'ALL';
 }
-document.getElementById('monFolderSelect').addEventListener('change', refreshMonitorFolder);
+document.getElementById('monFolderSelect').addEventListener('change', () => { monFolderPage = 1; refreshMonitorFolder(); });
 
 // 표에서 클릭으로 고른 태그들 — 오른쪽 값쓰기 패널이 이 태그들을 대상으로 동작한다.
 // 엑셀처럼: 클릭=단일 선택(기준점 이동), Shift+클릭=기준점~클릭 범위 선택, Ctrl/Cmd+클릭=개별 추가·제거.
 let monFolderTags = [];
 let selectedWriteTagIds = new Set();
 let writeAnchorIndex = null;
+
+// ── 페이지당 100개 — 태그가 수천~수만 개일 때 한 번에 다 그리면 브라우저가 버벅인다 ──────
+const MON_FOLDER_PAGE_SIZE = 100;
+let monFolderSearch = '';
+let monFolderPage = 1;
+let monFolderPageRows = [];   // 지금 화면에 실제로 그려진 행들 — 클릭 인덱스가 이 배열 기준(전체가 아님)
+
+bindLiveSearch('monFolderSearch', () => {
+  monFolderSearch = document.getElementById('monFolderSearch').value;
+  monFolderPage = 1;   // 검색어가 바뀌면 결과 집합이 바뀌니 1페이지로
+  renderMonFolderTable();
+});
+
+document.querySelectorAll('.mon-folder-pager').forEach(pager => {
+  pager.querySelector('[data-act=first]').addEventListener('click', () => goToMonFolderPage(1));
+  pager.querySelector('[data-act=prev]').addEventListener('click', () => goToMonFolderPage(monFolderPage - 1));
+  pager.querySelector('[data-act=next]').addEventListener('click', () => goToMonFolderPage(monFolderPage + 1));
+  pager.querySelector('[data-act=last]').addEventListener('click', () => goToMonFolderPage(Infinity));
+  pager.querySelector('.pagination-page-input').addEventListener('change', e => goToMonFolderPage(Number(e.target.value)));
+});
+
+function goToMonFolderPage(page) {
+  monFolderPage = page;   // 실제 범위 클램프는 renderMonFolderTable이 총 페이지 수를 안 뒤에 한다
+  renderMonFolderTable();
+}
 
 // 값쓰기 패널 하단의 최근 이력 — 값쓰기 성공 직후 + 주기적으로 다시 불러온다.
 // 조회 실패는 조용히 무시한다(이력 조회가 안 된다고 값쓰기 화면 자체가 막히면 안 됨).
@@ -1273,35 +1441,66 @@ async function refreshMonitorFolder() {
   try {
     const { tags, lastPollAt } = await api('GET', '/api/admin/monitor/foldertags' + qs);
     monFolderTags = tags;
-    const body = document.getElementById('monFolderBody');
-    const empty = document.getElementById('monFolderEmpty');
-    document.getElementById('monFolderCount').textContent = `총 ${tags.length}건`;
     document.getElementById('monFolderUpdatedAt').textContent = formatUpdatedAt(lastPollAt);
     // 폴더 전환 등으로 표에서 사라진 태그는 선택에서도 정리한다.
     const stillValidIds = new Set(tags.map(t => t.id));
     [...selectedWriteTagIds].forEach(id => { if (!stillValidIds.has(id)) selectedWriteTagIds.delete(id); });
-    if (tags.length === 0) { body.innerHTML = ''; empty.hidden = false; renderWritePanel(false); return; }
-    empty.hidden = true;
-    body.innerHTML = tags.map(t => `
-      <tr data-writable data-id="${t.id}" class="${selectedWriteTagIds.has(t.id) ? 'is-write-selected' : ''}">
-        <td class="id-col">${t.id}</td>
-        <td class="name-col">${escapeHtml(t.name)}</td>
-        <td><span class="addr">${escapeHtml(t.address)}</span></td>
-        <td class="truncate-col" title="${escapeHtml(t.folderName)}">${escapeHtml(t.folderName)}</td>
-        <td class="val-col">${t.value === null ? '—' : t.value}</td>
-      </tr>`).join('');
-    [...body.children].forEach((tr, i) => tr.addEventListener('click', e => handleWriteRowClick(e, i)));
+    renderMonFolderTable();
     // 값쓰기 패널을 열어둔 채로 표가 갱신되면, 선택된 태그들의 "현재값" 표시도 최신으로 따라가게 한다.
     renderWritePanel(false);
   } catch (e) { showToast('모니터링 값 갱신 실패: ' + e.message, 'error'); }
 }
 
+// ID·태그이름·주소·값으로 검색 후 100개씩 페이지를 잘라서 그린다 — 실제 폴링(2.5초 자동 갱신)이
+// 매번 이 함수를 다시 부르지만, DOM에는 최대 100행만 남으므로 태그가 몇만 개여도 버벅이지 않는다.
+function renderMonFolderTable() {
+  const body = document.getElementById('monFolderBody');
+  const empty = document.getElementById('monFolderEmpty');
+  const view = filterAndSort(monFolderTags, monFolderSearch, ['id', 'name', 'address', 'value'], null);
+
+  const totalPages = Math.max(1, Math.ceil(view.length / MON_FOLDER_PAGE_SIZE));
+  monFolderPage = Math.min(Math.max(1, monFolderPage), totalPages);
+  const startIdx = (monFolderPage - 1) * MON_FOLDER_PAGE_SIZE;
+  monFolderPageRows = view.slice(startIdx, startIdx + MON_FOLDER_PAGE_SIZE);
+
+  document.getElementById('monFolderCount').textContent =
+    `총 ${view.length}건` + (view.length !== monFolderTags.length ? ` (전체 ${monFolderTags.length}건 중)` : '');
+
+  document.querySelectorAll('.mon-folder-total-pages').forEach(el => el.textContent = totalPages);
+  document.querySelectorAll('.mon-folder-pager .pagination-page-input').forEach(el => {
+    if (document.activeElement !== el) el.value = monFolderPage;   // 입력 중이면 덮어쓰지 않음
+  });
+  document.querySelectorAll('.mon-folder-pager [data-act=first], .mon-folder-pager [data-act=prev]')
+    .forEach(b => b.disabled = monFolderPage <= 1);
+  document.querySelectorAll('.mon-folder-pager [data-act=next], .mon-folder-pager [data-act=last]')
+    .forEach(b => b.disabled = monFolderPage >= totalPages);
+
+  if (view.length === 0) {
+    body.innerHTML = '';
+    empty.hidden = false;
+    empty.textContent = monFolderTags.length === 0 ? '표시할 태그가 없습니다.' : '검색 결과가 없습니다.';
+    return;
+  }
+  empty.hidden = true;
+  body.innerHTML = monFolderPageRows.map(t => `
+    <tr data-writable data-id="${t.id}" class="${selectedWriteTagIds.has(t.id) ? 'is-write-selected' : ''}">
+      <td class="id-col">${t.id}</td>
+      <td class="name-col">${escapeHtml(t.name)}</td>
+      <td><span class="addr">${escapeHtml(t.address)}</span></td>
+      <td class="truncate-col" title="${escapeHtml(t.folderName)}">${escapeHtml(t.folderName)}</td>
+      <td class="val-col">${t.value === null ? '—' : t.value}</td>
+    </tr>`).join('');
+  [...body.children].forEach((tr, i) => tr.addEventListener('click', e => handleWriteRowClick(e, i)));
+}
+
 function handleWriteRowClick(e, index) {
-  const tag = monFolderTags[index];
+  const tag = monFolderPageRows[index];
   if (!tag) return;
   if (e.shiftKey && writeAnchorIndex !== null) {
+    // Shift 범위선택은 지금 페이지에 보이는 행 기준으로만 동작한다 — 다른 페이지 행은 화면에
+    // 없어서 "범위"라는 개념 자체가 성립하지 않는다.
     const [lo, hi] = writeAnchorIndex < index ? [writeAnchorIndex, index] : [index, writeAnchorIndex];
-    selectedWriteTagIds = new Set(monFolderTags.slice(lo, hi + 1).map(t => t.id));
+    selectedWriteTagIds = new Set(monFolderPageRows.slice(lo, hi + 1).map(t => t.id));
   } else if (e.ctrlKey || e.metaKey) {
     if (selectedWriteTagIds.has(tag.id)) selectedWriteTagIds.delete(tag.id);
     else selectedWriteTagIds.add(tag.id);

@@ -310,7 +310,7 @@ public partial class PlcService
     }
 
     private const int ModbusReadTimeoutMs     = 10000;  // Modbus 응답 대기 (10s — 느린 PLC 대응, 영구 연결)
-    private const int MitsubishiReadTimeoutMs = 4000;   // Mitsubishi 응답 대기 (4s — 매 요청 새 연결, 로컬 LAN)
+    private const int MitsubishiReadTimeoutMs = 4000;   // Mitsubishi 응답 대기 (4s — 연결 재사용, 로컬 LAN)
     private const int LockWaitTimeoutMs       = 25000;  // 락 획득 대기 (25s — Modbus 최악 20s 보유에 여유)
 
     /// <summary>

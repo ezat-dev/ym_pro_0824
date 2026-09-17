@@ -50,12 +50,19 @@ public class TempMonitorService : BackgroundService
 
     private readonly ConcurrentQueue<PollFailureEntry> _failures = new();
     private const int MaxFailures = 30;
+    // LiveTagMonitorService와 동일한 목적 — 상세는 발생 즉시 ErFileLogger로 바로 쓰고, 여기는
+    // HourlyCommLogService가 매 정각 "지난 1시간 몇 건" 하트비트를 쓸 수 있게 개수만 센다.
+    private int _hourlyFailureCount;
     private void RecordFailure(string plcId, string? device, string message)
     {
-        _failures.Enqueue(new PollFailureEntry(DateTime.Now, plcId, device, message));
+        var entry = new PollFailureEntry(DateTime.Now, plcId, device, message);
+        _failures.Enqueue(entry);
         while (_failures.Count > MaxFailures) _failures.TryDequeue(out _);
+        Interlocked.Increment(ref _hourlyFailureCount);
+        Logging.ErFileLogger.Write("FAIL", $"[온도] {plcId}{(device != null ? "/" + device : "")} — {message}");
     }
     public IReadOnlyList<PollFailureEntry> RecentFailures => _failures.ToArray().Reverse().ToList();
+    public int DrainHourlyFailureCount() => Interlocked.Exchange(ref _hourlyFailureCount, 0);
 
     // ── 한 바퀴 소요시간 이력 (차트용) — 30초 주기라 120건이면 최근 1시간치 ──────────────
     private readonly ConcurrentQueue<CycleDurationEntry> _durationHistory = new();

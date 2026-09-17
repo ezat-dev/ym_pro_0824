@@ -78,6 +78,9 @@ builder.Services.AddSingleton<LiveTagMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveTagMonitorService>());
 builder.Services.AddSingleton<TempMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TempMonitorService>());
+// 매 정각 D:\ER_LOG에 통신 실패 요약을 남기는 서비스 — 위 두 서비스처럼 API가 같은 인스턴스를
+// 따로 참조할 일이 없어서 AddSingleton 없이 AddHostedService 하나로 충분하다.
+builder.Services.AddHostedService<HourlyCommLogService>();
 
 var app = builder.Build();
 app.UseCors();

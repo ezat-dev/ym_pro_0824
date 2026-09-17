@@ -18,7 +18,7 @@
 //
 // [처리 흐름]
 //   1) appsettings.json의 "PlcMonitor" 설정(Enabled/IntervalMs/ChunkSize/TreatNonZeroAsOn)을 읽는다.
-//   2) 매 IntervalMs(기본 1000ms)마다 PollOnceAsync 반복:
+//   2) 매 IntervalMs(기본 2000ms)마다 PollOnceAsync 반복:
 //        a) tb_alarm_tag ⨝ tb_plc, folders_tags ⨝ tb_plc 두 테이블을 각각 조회해서 하나의
 //           목록(CombinedTagRow, 출처 표시 포함)으로 합친다 (TagCacheMs 동안 메모리 캐시).
 //        b) PLC(plc_id)+디바이스(D/M/L/X/Y/B/W/R)별로 묶어서, 두 출처의 주소를 합친 뒤
@@ -60,7 +60,10 @@ public sealed record PollFailureEntry(DateTime At, string PlcId, string? Device,
 
 // PLC 하나가 이번 사이클에 몇 개의 폴더/알람 태그를 "한 번에 묶어서" 읽고 있는지 —
 // 관리 화면에서 "어떻게 묶여서 폴링되는지"를 시각적으로 보여주기 위한 요약.
-public sealed record PollGroupInfo(string PlcId, string PlcLabel, int FolderTagCount, int AlarmTagCount);
+// ChunkTotal/ChunkFail: 태그 개수가 아니라 "실제 PLC 왕복 요청 개수" 기준 — 주소가 얼마나
+// 흩어져 있는지에 따라 태그 수천 개가 청크 몇십 개로 묶일 수도, 수백 개로 쪼개질 수도 있어서
+// 태그 개수만으로는 "이번 사이클에 실제로 몇 번 통신했고 몇 번 성공했는지"를 알 수 없다.
+public sealed record PollGroupInfo(string PlcId, string PlcLabel, int FolderTagCount, int AlarmTagCount, int ChunkTotal, int ChunkFail);
 
 // 한 바퀴(사이클) 소요시간 1건 — 관리 화면의 "폴링 주기" 차트가 시간에 따른 추이를 그릴 때 쓴다.
 public sealed record CycleDurationEntry(DateTime At, long DurationMs);
@@ -78,15 +81,28 @@ public class LiveTagMonitorService : BackgroundService
     // 이번 사이클(모든 PLC 그룹의 Task.WhenAll)이 실제로 몇 ms 걸렸는지 — 관리 화면에 그대로 노출.
     public long LastCycleDurationMs { get; private set; }
     public int IntervalMs { get; private set; } = 2000;
+    // PlcMonitor:ChunkSize — 관리 화면이 "N개를 X개씩 묶어서 읽음" 문구를 실제 설정값으로 보여주기 위해 노출.
+    public int ChunkSize { get; private set; } = 100;
 
     // ── 최근 폴링 실패 (성공은 기록하지 않음 — "실패시에만 로그" 요구사항) ──────────────
     private readonly ConcurrentQueue<PollFailureEntry> _failures = new();
     private const int MaxFailures = 30;
+    // 매 정각 D:\ER_LOG에 "지난 1시간 몇 건 실패했는지" 하트비트 한 줄을 남기는 HourlyCommLogService
+    // 전용 카운터 — 상세 내용은 아래 RecordFailure가 발생 즉시 ErFileLogger로 바로 쓰므로, 여기는
+    // 개수만 세면 된다(Interlocked로 스레드 안전하게 증가/리셋).
+    private int _hourlyFailureCount;
     private void RecordFailure(string plcId, string? device, string message)
     {
-        _failures.Enqueue(new PollFailureEntry(DateTime.Now, plcId, device, message));
+        var entry = new PollFailureEntry(DateTime.Now, plcId, device, message);
+        _failures.Enqueue(entry);
         while (_failures.Count > MaxFailures) _failures.TryDequeue(out _);
+        Interlocked.Increment(ref _hourlyFailureCount);
+        // 실패는 발생한 그 순간 바로 상세히 남긴다 — 정각까지 기다리지 않는다.
+        Logging.ErFileLogger.Write("FAIL", $"[알람/폴더] {plcId}{(device != null ? "/" + device : "")} — {message}");
     }
+
+    // HourlyCommLogService가 매 정각 호출 — 지난 1시간 동안 쌓인 실패 "개수"를 꺼내면서 0으로 리셋한다.
+    public int DrainHourlyFailureCount() => Interlocked.Exchange(ref _hourlyFailureCount, 0);
 
     // ── 한 바퀴 소요시간 이력 (차트용) — 2초 주기라 150건이면 최근 5분치 ───────────────
     private readonly ConcurrentQueue<CycleDurationEntry> _durationHistory = new();
@@ -112,10 +128,20 @@ public class LiveTagMonitorService : BackgroundService
         var folderCounts = folderTags.GroupBy(t => t.Plc.Id).ToDictionary(g => g.Key, g => g.Count());
         var alarmCounts  = alarmTags.GroupBy(t => t.Plc.Id).ToDictionary(g => g.Key, g => g.Count());
 
-        return labels.Keys.OrderBy(id => id).Select(id => new PollGroupInfo(
-            id, labels[id], folderCounts.GetValueOrDefault(id, 0), alarmCounts.GetValueOrDefault(id, 0)
-        )).ToList();
+        return labels.Keys.OrderBy(id => id).Select(id =>
+        {
+            _lastCycleChunkStats.TryGetValue(id, out var chunkStat);   // 없으면 (0,0) 기본값
+            return new PollGroupInfo(
+                id, labels[id], folderCounts.GetValueOrDefault(id, 0), alarmCounts.GetValueOrDefault(id, 0),
+                chunkStat.Total, chunkStat.Fail
+            );
+        }).ToList();
     }
+
+    // PLC별 "이번 사이클" 청크(실제 PLC 왕복 요청) 성공/실패 집계 — PollOnceAsync가 매 사이클
+    // 갱신하고, GetPollGroups()가 그대로 읽어 관리 화면에 노출한다. 같은 plcId는 한 사이클에
+    // 정확히 하나의 그룹 태스크만 쓰므로 별도 락 없이 그 태스크가 끝날 때 한 번만 대입한다.
+    private readonly ConcurrentDictionary<string, (int Total, int Fail)> _lastCycleChunkStats = new();
 
     // ── 알람 상태 캐시 (tagId → 마지막 ON/OFF) — DB는 전환시에만 씀. 원래는 전환 감지에만 쓰던
     // private 필드였는데, "실시간 모니터링" 화면이 알람 현재 상태를 그대로 보여줘야 해서 공개했다.
@@ -152,6 +178,7 @@ public class LiveTagMonitorService : BackgroundService
 
         if (chunkSize < 1) chunkSize = 100;
         IntervalMs = intervalMs;
+        ChunkSize  = chunkSize;
         _logger.LogInformation(
             "LiveTagMonitorService started. IntervalMs={Interval}, ChunkSize={ChunkSize}, TagCacheMs={TagCache}",
             intervalMs, chunkSize, tagCacheMs);
@@ -242,6 +269,9 @@ public class LiveTagMonitorService : BackgroundService
             {
                 var svc = _cache.GetOrCreate(plc);
                 var groupAlarmResults = new List<(int TagId, bool IsOn, int Raw)>();
+                // 이번 사이클에 이 PLC가 실제로 몇 번 왕복했고(=청크 수) 그중 몇 번 실패했는지 —
+                // devGroup foreach 안에서 순서대로 늘어나므로 별도 동기화 없이 지역변수로 충분하다.
+                int chunkTotal = 0, chunkFail = 0;
 
                 foreach (var devGroup in plcGroup.GroupBy(t => t.DeviceType))
                 {
@@ -250,9 +280,11 @@ public class LiveTagMonitorService : BackgroundService
                     // 하나의 청크로 묶인다 — 두 시스템이 따로 PLC에 왕복하지 않는다.
                     var addrList = devGroup.Select(t => t.AddressValue).Distinct().OrderBy(a => a).ToList();
                     var chunks   = BuildChunks(addrList, chunkSize);
+                    chunkTotal  += chunks.Count;
 
                     var valueMap = await svc.ReadWordsBatchAsync(chunks, deviceType, (start, count, ex) =>
                     {
+                        chunkFail++;
                         _logger.LogWarning(ex,
                             "PLC read failed. PlcId={PlcId}, Device={Device}, Start={Start}, Count={Count}",
                             plc.Id, deviceType, start, count);
@@ -276,6 +308,8 @@ public class LiveTagMonitorService : BackgroundService
                     }
                 }
 
+                _lastCycleChunkStats[plc.Id] = (chunkTotal, chunkFail);
+
                 // 이 PLC의 읽기가 끝나자마자 바로 전환 감지+DB 반영 (다른 PLC 그룹의 진행상황과 무관)
                 if (groupAlarmResults.Count > 0)
                     await ProcessAlarmTransitionsAsync(groupAlarmResults, isFirstPollThisCycle, ct);
@@ -288,6 +322,8 @@ public class LiveTagMonitorService : BackgroundService
                 // onRangeError는 "연결은 됐는데 읽기 도중 실패"만 잡는다 — 연결 자체가 거부/타임아웃되면
                 // (EnsureConnectedAsync 단계) onRangeError까지 가지도 못하고 여기로 바로 떨어지므로,
                 // 그 경우를 위해 여기서도 RecordFailure를 남겨야 대시보드 "최근 실패"에 빠짐없이 보인다.
+                // 청크 진행 상황은 어디서 끊겼는지 알 수 없으니 갱신하지 않는다 — 화면엔 직전 정상
+                // 사이클의 마지막 값이 남고, "최근 실패" 목록이 이번 사이클이 통째로 죽었음을 알려준다.
                 _logger.LogWarning(ex, "PLC group poll failed, skipping this group for this cycle. PlcId={PlcId}", plc.Id);
                 RecordFailure(plc.Id, null, $"그룹 폴링 실패: {ex.Message}");
             }

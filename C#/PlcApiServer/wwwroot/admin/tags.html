@@ -331,6 +331,13 @@
       </details>
 
       <div class="table-wrap">
+        <div class="pagination folder-tag-pager is-top">
+          <button type="button" class="btn-icon" data-act="first" title="처음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M18 17l-5-5 5-5"/><path d="M11 17l-5-5 5-5"/></svg></button>
+          <button type="button" class="btn-icon" data-act="prev" title="이전 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <span class="pagination-jump"><input type="number" class="pagination-page-input" min="1" value="1"> / <span class="pager-total-pages">1</span>페이지</span>
+          <button type="button" class="btn-icon" data-act="next" title="다음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+          <button type="button" class="btn-icon" data-act="last" title="마지막 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17l5-5-5-5"/><path d="M13 17l5-5-5-5"/></svg></button>
+        </div>
         <table class="data-table" id="folderTagTable">
           <thead>
             <tr>
@@ -347,6 +354,13 @@
           <tbody id="folderTagBody"></tbody>
         </table>
         <div class="empty-state" id="folderTagEmpty" hidden>왼쪽에서 폴더를 먼저 선택하세요.</div>
+        <div class="pagination folder-tag-pager is-bottom">
+          <button type="button" class="btn-icon" data-act="first" title="처음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M18 17l-5-5 5-5"/><path d="M11 17l-5-5 5-5"/></svg></button>
+          <button type="button" class="btn-icon" data-act="prev" title="이전 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <span class="pagination-jump"><input type="number" class="pagination-page-input" min="1" value="1"> / <span class="pager-total-pages">1</span>페이지</span>
+          <button type="button" class="btn-icon" data-act="next" title="다음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+          <button type="button" class="btn-icon" data-act="last" title="마지막 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17l5-5-5-5"/><path d="M13 17l5-5-5-5"/></svg></button>
+        </div>
       </div>
     </div>
   </section>
@@ -499,17 +513,35 @@
             </div>
           </details>
           <select id="monFolderSelect" class="filter-select"><option value="ALL">전체 폴더</option></select>
+          <div class="search-box">
+            <span class="search-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
+            <input type="search" class="search-input" id="monFolderSearch" placeholder="ID · 태그이름 · 주소 · 값으로 검색">
+          </div>
           <span class="count-badge" id="monFolderCount"></span>
           <div class="toolbar-spacer"></div>
           <span class="live-indicator"><span class="live-dot"></span><span id="monFolderUpdatedAt">-</span></span>
         </div>
         <div class="monitor-split">
           <div class="table-wrap monitor-split-table">
+            <div class="pagination mon-folder-pager is-top">
+              <button type="button" class="btn-icon" data-act="first" title="처음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M18 17l-5-5 5-5"/><path d="M11 17l-5-5 5-5"/></svg></button>
+              <button type="button" class="btn-icon" data-act="prev" title="이전 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+              <span class="pagination-jump"><input type="number" class="pagination-page-input" min="1" value="1"> / <span class="mon-folder-total-pages">1</span>페이지</span>
+              <button type="button" class="btn-icon" data-act="next" title="다음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+              <button type="button" class="btn-icon" data-act="last" title="마지막 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17l5-5-5-5"/><path d="M13 17l5-5-5-5"/></svg></button>
+            </div>
             <table class="data-table">
               <thead><tr><th style="width:56px">ID</th><th>태그 이름</th><th style="width:110px">주소</th><th style="width:120px">폴더</th><th style="width:140px">값</th></tr></thead>
               <tbody id="monFolderBody"></tbody>
             </table>
             <div class="empty-state" id="monFolderEmpty" hidden>표시할 태그가 없습니다.</div>
+            <div class="pagination mon-folder-pager is-bottom">
+              <button type="button" class="btn-icon" data-act="first" title="처음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M18 17l-5-5 5-5"/><path d="M11 17l-5-5 5-5"/></svg></button>
+              <button type="button" class="btn-icon" data-act="prev" title="이전 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+              <span class="pagination-jump"><input type="number" class="pagination-page-input" min="1" value="1"> / <span class="mon-folder-total-pages">1</span>페이지</span>
+              <button type="button" class="btn-icon" data-act="next" title="다음 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+              <button type="button" class="btn-icon" data-act="last" title="마지막 페이지"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17l5-5-5-5"/><path d="M13 17l5-5-5-5"/></svg></button>
+            </div>
           </div>
 
           <div class="write-panel" id="writePanel">
@@ -696,6 +728,17 @@
         <button type="submit" class="btn btn-primary">저장</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ============================= 태그별 URL 사용법 모달 (row-actions의 정보 아이콘) ============================= -->
+<div class="modal-backdrop" id="tagUsageModalBackdrop" hidden>
+  <div class="modal modal-wide">
+    <h2 id="tagUsageModalTitle">태그 사용법</h2>
+    <div class="docs-body" id="tagUsageBody"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" data-close-modal="tagUsageModalBackdrop">닫기</button>
+    </div>
   </div>
 </div>
 

@@ -380,7 +380,7 @@ export default function AlarmPage() {
             <p className="mes-page-desc">실시간 알람 대시보드</p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6 }}> 
           <button
             className={tab === 'dashboard' ? 'mes-btn mes-btn-primary' : 'mes-btn mes-btn-secondary'}
             onClick={() => setTab('dashboard')}
