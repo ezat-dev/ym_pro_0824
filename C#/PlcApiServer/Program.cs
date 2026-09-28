@@ -53,6 +53,7 @@ using PlcApiServer.Services;
 using PlcApiServer.Repositories;
 using PlcApiServer.Models;
 using PlcApiServer.Endpoints;
+using PlcApiServer.Logging;
 
 // ── 웹 애플리케이션 빌더 생성 & 서비스 등록 ────────────────────────────────────
 var builder = WebApplication.CreateBuilder(args);
@@ -63,7 +64,15 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 
 // JSON 들여쓰기 — 브라우저에서 직접 열어봐도(수동 테스트) 한 줄로 뭉쳐 나오지 않고 보기 좋게 나오도록.
 // AJAX로 fetch/axios가 파싱하는 건 들여쓰기 여부와 무관해서 실제 프론트 소비에는 영향 없다.
-builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.WriteIndented = true);
+// Encoder 완화 — 기본 인코더는 한글 등 비ASCII 문자를 \uXXXX로 이스케이프하는데, 이걸 그대로 AI
+// 어시스턴트의 도구 결과로 넘기면 작은 모델(qwen2.5:3b)이 이스케이프를 못 풀고 엉뚱하게 베껴 써서
+// 답변이 깨지는 게 실제로 확인됐다(예: 알람 메시지). 순수 JSON API라 HTML에 그대로 꽂힐 일이 없으니
+// UnsafeRelaxedJsonEscaping으로 한글이 사람이 읽는 그대로 나가게 한다.
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.WriteIndented = true;
+    o.SerializerOptions.Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+});
 
 // DI 컨테이너에 싱글톤으로 등록 — 요청마다 새로 만들지 않고 앱 생명주기 동안 인스턴스 1개 공유
 builder.Services.AddSingleton<PlcRegistry>();     // 기본(default) PLC 1대의 설정 + 접근 창구
@@ -78,6 +87,10 @@ builder.Services.AddSingleton<LiveTagMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveTagMonitorService>());
 builder.Services.AddSingleton<TempMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TempMonitorService>());
+builder.Services.AddSingleton<StringTagMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StringTagMonitorService>());
+builder.Services.AddSingleton<DoubleWordTagMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DoubleWordTagMonitorService>());
 // 매 정각 D:\ER_LOG에 통신 실패 요약을 남기는 서비스 — 위 두 서비스처럼 API가 같은 인스턴스를
 // 따로 참조할 일이 없어서 AddSingleton 없이 AddHostedService 하나로 충분하다.
 builder.Services.AddHostedService<HourlyCommLogService>();
@@ -557,50 +570,8 @@ static async Task<List<(int Id, int FolderId, string Name, string Address, strin
     return list;
 }
 
-// 실제 쓰기가 성공한 뒤에만 호출되는 이력 기록 — tb_tag_log가 없으면 그때그때 만든다.
-// 쓰기는 사람이 버튼을 누를 때만 일어나는 저빈도 동작이라, 매번 CREATE TABLE IF NOT EXISTS를
-// 다시 실행해도 비용 문제가 없다(TempMonitorService처럼 매 30초 도는 핫패스가 아님).
-// 기록 실패가 "쓰기 자체는 이미 성공"한 응답을 막으면 안 되므로 예외를 삼킨다(로그만 남김).
-static async Task LogTagWriteAsync(string connStr, string tagType, int? tagId, string? tagName, string address, string plcId, int? oldValue, int newValue)
-{
-    try
-    {
-        using var conn = new MySqlConnection(connStr);
-        await conn.OpenAsync();
-
-        using (var ddl = new MySqlCommand(@"
-CREATE TABLE IF NOT EXISTS tb_tag_log (
-    log_id     BIGINT AUTO_INCREMENT PRIMARY KEY,
-    tag_type   VARCHAR(10) NOT NULL,
-    tag_id     INT NULL,
-    tag_name   VARCHAR(100) NULL,
-    address    VARCHAR(50) NOT NULL,
-    plc_id     VARCHAR(50) NOT NULL,
-    old_value  INT NULL,
-    new_value  INT NOT NULL,
-    written_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_tag_log_written (written_at),
-    INDEX idx_tag_log_tag (tag_type, tag_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", conn))
-            await ddl.ExecuteNonQueryAsync();
-
-        using var cmd = new MySqlCommand(@"
-INSERT INTO tb_tag_log(tag_type, tag_id, tag_name, address, plc_id, old_value, new_value)
-VALUES (@tagType, @tagId, @tagName, @address, @plcId, @oldValue, @newValue)", conn);
-        cmd.Parameters.AddWithValue("@tagType", tagType);
-        cmd.Parameters.AddWithValue("@tagId", (object?)tagId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@tagName", (object?)tagName ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@address", address);
-        cmd.Parameters.AddWithValue("@plcId", plcId);
-        cmd.Parameters.AddWithValue("@oldValue", (object?)oldValue ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@newValue", newValue);
-        await cmd.ExecuteNonQueryAsync();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[TagLog] 기록 실패(쓰기 자체는 성공): {ex.Message}");
-    }
-}
+// 값쓰기 이력 기록(tb_tag_log)은 Logging/TagWriteLog.cs로 옮겼다 — AdminTagEndpoints.cs의 알람
+// 태그 쓰기 경로에서도 똑같은 감사 로그가 필요해져서, 이 파일 안 로컬 함수로는 재사용이 안 돼 공용화함.
 
 // GET /api/foldertag/value/by-name?name=TEST42
 //   이름으로 태그를 찾아 현재값을 즉시 반환(PLC 통신 없음, 캐시에서 바로 꺼냄).
@@ -686,7 +657,7 @@ app.MapGet("/api/foldertag/write/by-name", async (string name, int value, int? f
         else
             await svc.WriteWordAsync(parsed.Value.Addr, value, parsed.Value.Device);
 
-        await LogTagWriteAsync(repo.ConnectionString, "FOLDER", tag.Id, name, tag.Address, tag.PlcId, oldRaw, value);
+        await TagWriteLog.LogAsync(repo.ConnectionString, "FOLDER", tag.Id, name, tag.Address, tag.PlcId, oldRaw, value);
         return Results.Ok(new { success = true, name, plcId = tag.PlcId, address = tag.Address, type = isBit ? "BIT" : "WORD", value });
     }
     catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
@@ -734,7 +705,7 @@ app.MapGet("/api/foldertag/write/by-address", async (string plcId, string addres
         }
         if (logTagId.HasValue && monitor.AlarmTagValues.TryGetValue(logTagId.Value, out var wasOn))
             oldValue = wasOn ? 1 : 0;
-        await LogTagWriteAsync(repo.ConnectionString, logTagId.HasValue ? "ALARM" : "ADDRESS", logTagId, logTagName, address, plcId, oldValue, value);
+        await TagWriteLog.LogAsync(repo.ConnectionString, logTagId.HasValue ? "ALARM" : "ADDRESS", logTagId, logTagName, address, plcId, oldValue, value);
 
         return Results.Ok(new { success = true, plcId, address, device = dev, type = isBit ? "BIT" : "WORD", value });
     }

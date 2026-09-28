@@ -26,6 +26,7 @@ using ClosedXML.Excel;
 using MySqlConnector;
 using PlcApiServer.Repositories;
 using PlcApiServer.Services;
+using PlcApiServer.Logging;
 
 namespace PlcApiServer.Endpoints;
 
@@ -41,7 +42,722 @@ public static class AdminTagEndpoints
         MapTempTagEndpoints(app);
         MapAlarmFolderEndpoints(app);
         MapAlarmTagEndpoints(app);
+        MapStringTagEndpoints(app);
+        MapDoubleWordTagEndpoints(app);
         MapMonitorEndpoints(app);
+    }
+
+    // ================= 더블워드 태그 (dw_folders_tags) =================
+    // 모니터링 태그(folders_tags)와 같은 folders 테이블을 그대로 재사용해서 폴더로 묶는다 —
+    // 폴더 CRUD 자체는 /api/admin/folders(MapFolderEndpoints)에 이미 있어 그대로 쓰고, 여기서는
+    // dw_folders_tags(태그 정의)만 다룬다. 워드 여러 개(2~4)를 이어붙여 정수 하나로 합치는 게
+    // 문자열 태그와 다른 점 — "어느 오프셋이 최하위/최상위인지"를 word_order로 태그마다 정한다.
+    private static void MapDoubleWordTagEndpoints(WebApplication app)
+    {
+        // GET /api/admin/dwtags?folderId=&name= — 목록 + 현재 합쳐진 정수값
+        app.MapGet("/api/admin/dwtags", async (int? folderId, string? name, PlcRepository repo, DoubleWordTagMonitorService monitor) =>
+        {
+            try
+            {
+                var list = await QueryDwTags(repo, folderId, name);
+                var tags = list.Select(t => new
+                {
+                    id = t.Id,
+                    folderId = t.FolderId,
+                    name = t.Name,
+                    address = t.Address,
+                    plcId = t.PlcId,
+                    wordCount = t.WordCount,
+                    wordOrder = t.WordOrder,
+                    signed = t.Signed,
+                    enabled = t.Enabled,
+                    value = monitor.DoubleWordTagValues.TryGetValue(t.Id, out var v) ? (long?)v : null
+                });
+                return Results.Ok(new { success = true, lastPollAt = monitor.LastPollAt, tags });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/dwtags/count?folderId= — 개수만 (다른 태그 타입과 동일 패턴)
+        app.MapGet("/api/admin/dwtags/count", async (int? folderId, PlcRepository repo) =>
+        {
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                await EnsureDwTagTableAsync(conn);
+                string sql = "SELECT COUNT(*) FROM dw_folders_tags" + (folderId.HasValue ? " WHERE folder_id=@fid" : "");
+                using var cmd = new MySqlCommand(sql, conn);
+                if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+                long count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                return Results.Ok(new { success = true, count });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/dwtags/export?folderId= (생략 시 전체) — 엑셀 다운로드
+        app.MapGet("/api/admin/dwtags/export", async (int? folderId, PlcRepository repo) =>
+        {
+            var list = await QueryDwTags(repo, folderId);
+            var rows = list.Select(t => new object?[] { t.Id, t.FolderId, t.Name, t.Address, t.PlcId, t.WordCount, t.WordOrder, t.Signed ? 1 : 0, t.Enabled ? 1 : 0 });
+            var bytes = WriteXlsx("더블워드태그", new[] { "ID", "폴더ID", "이름", "주소", "PLC ID", "워드개수", "워드순서", "부호있음(1/0)", "사용(1/0)" }, rows);
+            return Results.File(bytes, XlsxContentType, $"dw_tags_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+        });
+
+        // POST /api/admin/dwtags/import?folderId= — 엑셀 업로드로 일괄 등록/수정
+        app.MapPost("/api/admin/dwtags/import", async (IFormFile file, int? folderId, PlcRepository repo) =>
+        {
+            List<Dictionary<string, string>> rows;
+            try
+            {
+                using var stream = file.OpenReadStream();
+                rows = ReadXlsxRows(stream);
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = "엑셀 파일을 읽을 수 없습니다: " + ex.Message }); }
+
+            int inserted = 0, updated = 0;
+            var errors = new List<string>();
+            using var conn = new MySqlConnection(repo.ConnectionString);
+            await conn.OpenAsync();
+            await EnsureDwTagTableAsync(conn);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                int excelRow = i + 2;
+                string name = row.GetValueOrDefault("이름", "");
+                string address = row.GetValueOrDefault("주소", "");
+                string plcId = row.GetValueOrDefault("PLC ID", "");
+                int wordCount = int.TryParse(row.GetValueOrDefault("워드개수", ""), out var wc) ? wc : DoubleWordCodec.MinWordCount;
+                string wordOrder = row.GetValueOrDefault("워드순서", "");
+                if (string.IsNullOrWhiteSpace(wordOrder)) wordOrder = DoubleWordCodec.DefaultOrder(wordCount);
+                bool signed = ParseEnabledCell(row.GetValueOrDefault("부호있음(1/0)", ""));
+                bool enabled = ParseEnabledCell(row.GetValueOrDefault("사용(1/0)", ""));
+                int? fid = int.TryParse(row.GetValueOrDefault("폴더ID", ""), out var pf) ? pf : folderId;
+                bool hasId = int.TryParse(row.GetValueOrDefault("ID", ""), out var id) && id > 0;
+
+                var err = ValidateTagBasics(name, address, plcId);
+                if (err == null && (wordCount < DoubleWordCodec.MinWordCount || wordCount > DoubleWordCodec.MaxWordCount))
+                    err = $"워드 개수는 {DoubleWordCodec.MinWordCount}~{DoubleWordCodec.MaxWordCount} 사이여야 합니다";
+                if (err == null && DoubleWordCodec.ParseOrder(wordOrder, wordCount) == null)
+                    err = $"워드 순서는 0~{wordCount - 1}을 콤마로 구분한 순열이어야 합니다";
+                if (err == null && !signed && wordCount >= 4)
+                    err = "워드 4개(64비트) + 부호없음 조합은 지원하지 않습니다 — 부호있음으로 저장하거나 워드 개수를 3개 이하로 줄이세요.";
+                if (err == null && fid == null) err = "폴더ID가 없고 기본 폴더도 지정되지 않았습니다";
+                if (err == null && LiveTagMonitorService.ParseAddressFull(address) == null) err = $"주소 형식을 해석할 수 없습니다: '{address}'";
+                if (err == null && await repo.GetByIdAsync(plcId.Trim()) == null) err = $"존재하지 않는 PLC ID입니다: '{plcId}'";
+                if (err == null && fid != null && !await FolderExistsAsync(repo, fid.Value)) err = $"존재하지 않는 폴더입니다: folderId={fid}";
+                if (err == null && fid != null && await DwNameExistsInFolderAsync(repo, fid.Value, name.Trim(), hasId ? id : (int?)null))
+                    err = $"같은 폴더 안에 이미 같은 이름의 태그가 있습니다: '{name.Trim()}'";
+                if (err != null) { errors.Add($"{excelRow}행: {err}"); continue; }
+
+                try
+                {
+                    if (hasId)
+                    {
+                        using var cmd = new MySqlCommand(@"
+UPDATE dw_folders_tags SET folder_id=@fid, name=@n, address=@addr, plc_id=@plc,
+       word_count=@wc, word_order=@wo, signed_val=@sg, enabled=@en
+ WHERE id=@id", conn);
+                        cmd.Parameters.AddWithValue("@fid", fid);
+                        cmd.Parameters.AddWithValue("@n", name.Trim());
+                        cmd.Parameters.AddWithValue("@addr", address.Trim());
+                        cmd.Parameters.AddWithValue("@plc", plcId.Trim());
+                        cmd.Parameters.AddWithValue("@wc", wordCount);
+                        cmd.Parameters.AddWithValue("@wo", wordOrder.Trim());
+                        cmd.Parameters.AddWithValue("@sg", signed);
+                        cmd.Parameters.AddWithValue("@en", enabled);
+                        cmd.Parameters.AddWithValue("@id", id);
+                        int n = await cmd.ExecuteNonQueryAsync();
+                        if (n > 0) updated++; else errors.Add($"{excelRow}행: ID {id}인 태그를 찾을 수 없습니다");
+                    }
+                    else
+                    {
+                        using var cmd = new MySqlCommand(@"
+INSERT INTO dw_folders_tags(folder_id, name, address, plc_id, word_count, word_order, signed_val, enabled)
+VALUES (@fid, @n, @addr, @plc, @wc, @wo, @sg, @en)", conn);
+                        cmd.Parameters.AddWithValue("@fid", fid);
+                        cmd.Parameters.AddWithValue("@n", name.Trim());
+                        cmd.Parameters.AddWithValue("@addr", address.Trim());
+                        cmd.Parameters.AddWithValue("@plc", plcId.Trim());
+                        cmd.Parameters.AddWithValue("@wc", wordCount);
+                        cmd.Parameters.AddWithValue("@wo", wordOrder.Trim());
+                        cmd.Parameters.AddWithValue("@sg", signed);
+                        cmd.Parameters.AddWithValue("@en", enabled);
+                        await cmd.ExecuteNonQueryAsync();
+                        inserted++;
+                    }
+                }
+                catch (MySqlException ex) when (IsFkRestrict(ex)) { errors.Add($"{excelRow}행: 존재하지 않는 폴더입니다"); }
+                catch (Exception ex) { errors.Add($"{excelRow}행: {ex.Message}"); }
+            }
+
+            return Results.Ok(new { success = true, inserted, updated, errors });
+        }).DisableAntiforgery();
+
+        // POST /api/admin/dwtags  body: { folderId, name, address, plcId, wordCount, wordOrder, signed, enabled? }
+        app.MapPost("/api/admin/dwtags", async (DoubleWordTagRequest req, PlcRepository repo) =>
+        {
+            var err = await ValidateDwTagBasicsAsync(req, repo);
+            if (err != null) return Results.Ok(new { success = false, error = err });
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                await EnsureDwTagTableAsync(conn);
+                using var cmd = new MySqlCommand(@"
+INSERT INTO dw_folders_tags(folder_id, name, address, plc_id, word_count, word_order, signed_val, enabled)
+VALUES (@folderId, @name, @address, @plcId, @wordCount, @wordOrder, @signed, @enabled)", conn);
+                cmd.Parameters.AddWithValue("@folderId", req.FolderId);
+                cmd.Parameters.AddWithValue("@name", req.Name.Trim());
+                cmd.Parameters.AddWithValue("@address", req.Address.Trim());
+                cmd.Parameters.AddWithValue("@plcId", req.PlcId.Trim());
+                cmd.Parameters.AddWithValue("@wordCount", req.WordCount);
+                cmd.Parameters.AddWithValue("@wordOrder", req.WordOrder.Trim());
+                cmd.Parameters.AddWithValue("@signed", req.Signed);
+                cmd.Parameters.AddWithValue("@enabled", req.Enabled ?? true);
+                await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = true, id = (int)cmd.LastInsertedId });
+            }
+            catch (MySqlException ex) when (IsFkRestrict(ex))
+            { return Results.Ok(new { success = false, error = "존재하지 않는 폴더입니다" }); }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // PUT /api/admin/dwtags/{id}
+        app.MapPut("/api/admin/dwtags/{id:int}", async (int id, DoubleWordTagRequest req, PlcRepository repo) =>
+        {
+            var err = await ValidateDwTagBasicsAsync(req, repo, id);
+            if (err != null) return Results.Ok(new { success = false, error = err });
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                using var cmd = new MySqlCommand(@"
+UPDATE dw_folders_tags SET folder_id=@folderId, name=@name, address=@address, plc_id=@plcId,
+       word_count=@wordCount, word_order=@wordOrder, signed_val=@signed, enabled=@enabled
+ WHERE id=@id", conn);
+                cmd.Parameters.AddWithValue("@folderId", req.FolderId);
+                cmd.Parameters.AddWithValue("@name", req.Name.Trim());
+                cmd.Parameters.AddWithValue("@address", req.Address.Trim());
+                cmd.Parameters.AddWithValue("@plcId", req.PlcId.Trim());
+                cmd.Parameters.AddWithValue("@wordCount", req.WordCount);
+                cmd.Parameters.AddWithValue("@wordOrder", req.WordOrder.Trim());
+                cmd.Parameters.AddWithValue("@signed", req.Signed);
+                cmd.Parameters.AddWithValue("@enabled", req.Enabled ?? true);
+                cmd.Parameters.AddWithValue("@id", id);
+                int n = await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = n > 0 });
+            }
+            catch (MySqlException ex) when (IsFkRestrict(ex))
+            { return Results.Ok(new { success = false, error = "존재하지 않는 폴더입니다" }); }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // DELETE /api/admin/dwtags/{id}
+        app.MapDelete("/api/admin/dwtags/{id:int}", async (int id, PlcRepository repo) =>
+        {
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                using var cmd = new MySqlCommand("DELETE FROM dw_folders_tags WHERE id=@id", conn);
+                cmd.Parameters.AddWithValue("@id", id);
+                int n = await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = n > 0 });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/dwtags/write/by-name?name=&value=&folderId= — 정수를 워드 여러 개로 쪼개서 순서대로 씀
+        //   value를 long으로 직접 바인딩하면 숫자가 아닌 값이 왔을 때 우리 핸들러에 들어오지도 못하고
+        //   ASP.NET Core가 빈 본문의 400을 그냥 돌려버려서(이 앱 전체의 "항상 200 + {success,...}"
+        //   관례와 어긋남 — 실제로 확인됨), 문자열로 받아 직접 파싱하고 실패하면 우리 형식대로 답한다.
+        app.MapGet("/api/admin/dwtags/write/by-name", async (string name, string value, int? folderId, PlcRepository repo, PlcServiceCache cache, DoubleWordTagMonitorService monitor) =>
+        {
+            if (!long.TryParse(value, out long parsedValue))
+                return Results.Ok(new { success = false, error = $"정수가 아닙니다: '{value}'" });
+
+            var list = await QueryDwTags(repo, folderId, name);
+            if (list.Count == 0)
+                return Results.Ok(new { success = false, error = $"더블워드 태그를 찾을 수 없음: name='{name}'" });
+            if (list.Count > 1)
+                return Results.Ok(new
+                {
+                    success = false,
+                    error = $"'{name}'이 {list.Count}개 폴더에 걸쳐 있어 특정할 수 없음 — folderId를 같이 지정하세요.",
+                    candidates = list.Select(t => new { t.Id, t.FolderId, t.Address, t.PlcId })
+                });
+            var tag = list[0];
+
+            var order = DoubleWordCodec.ParseOrder(tag.WordOrder, tag.WordCount);
+            if (order == null) return Results.Ok(new { success = false, error = $"워드 순서 설정이 올바르지 않음: '{tag.WordOrder}'" });
+
+            long totalBits = 16L * tag.WordCount;
+            long max = tag.Signed ? (1L << (int)(totalBits - 1)) - 1 : (totalBits >= 64 ? long.MaxValue : (1L << (int)totalBits) - 1);
+            long min = tag.Signed ? -(1L << (int)(totalBits - 1)) : 0;
+            if (parsedValue < min || parsedValue > max)
+                return Results.Ok(new { success = false, error = $"값이 범위를 벗어남 — {(tag.Signed ? "부호있는" : "부호없는")} {totalBits}비트 범위는 {min} ~ {max}입니다." });
+
+            var cfg = await repo.GetByIdAsync(tag.PlcId);
+            if (cfg == null) return Results.Ok(new { success = false, error = $"tb_plc에 '{tag.PlcId}'가 없음" });
+
+            var parsed = LiveTagMonitorService.ParseAddressFull(tag.Address);
+            if (parsed == null) return Results.Ok(new { success = false, error = $"주소 형식을 해석할 수 없음: '{tag.Address}'" });
+
+            var words = DoubleWordCodec.Encode(parsedValue, order);
+            try
+            {
+                var svc = cache.GetOrCreate(cfg);
+                for (int i = 0; i < words.Length; i++)
+                    await svc.WriteWordAsync(parsed.Value.Addr + i, words[i], parsed.Value.Device);
+
+                // 다음 정식 폴링(기본 30초)을 기다리지 않고 방금 쓴 값을 바로 캐시에 반영 —
+                // 문자열 태그에서 겪은 "쓰기 직후 조회하면 안 바뀐 것처럼 보이는" 문제와 동일한 이유.
+                monitor.DoubleWordTagValues[tag.Id] = parsedValue;
+
+                return Results.Ok(new { success = true, name, plcId = tag.PlcId, address = tag.Address, value = parsedValue });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+    }
+
+    private static async Task<string?> ValidateDwTagBasicsAsync(DoubleWordTagRequest req, PlcRepository repo, int? excludeId = null)
+    {
+        var err = ValidateTagBasics(req.Name, req.Address, req.PlcId);
+        if (err == null && (req.WordCount < DoubleWordCodec.MinWordCount || req.WordCount > DoubleWordCodec.MaxWordCount))
+            err = $"워드 개수는 {DoubleWordCodec.MinWordCount}~{DoubleWordCodec.MaxWordCount} 사이여야 합니다";
+        if (err == null && DoubleWordCodec.ParseOrder(req.WordOrder, req.WordCount) == null)
+            err = $"워드 순서는 0~{req.WordCount - 1}을 콤마로 구분한 순열이어야 합니다 (예: {DoubleWordCodec.DefaultOrder(req.WordCount)})";
+        // 워드 4개(64비트)를 전부 채우면 내부적으로 값을 C#의 long(부호있는 64비트)으로만 다루기 때문에
+        // "부호없음" 해석을 적용할 여분 비트가 없다 — 최상위 비트가 켜진 큰 값이 화면엔 음수로 보이는
+        // 문제가 실제로 재현됨(예: 전부 0xFFFF → 정상은 18446744073709551615인데 -1로 표시됨).
+        // 워드 2~3개(32/48비트)는 long 안에 여유 비트가 있어 문제없다.
+        if (err == null && !req.Signed && req.WordCount >= 4)
+            err = "워드 4개(64비트) + 부호없음 조합은 지원하지 않습니다 — 부호있음으로 저장하거나 워드 개수를 3개 이하로 줄이세요.";
+        // 저장 시점에 주소/PLC를 미리 검증하지 않으면, 오타난 주소나 존재하지 않는 PLC ID가 그대로
+        // 저장돼 폴링에서 조용히 건너뛰어지고 화면엔 영원히 value:null만 남아 원인을 알 수 없게 된다
+        // (실제로 확인된 문제) — 저장 자체를 막고 바로 원인을 알려준다.
+        if (err == null && LiveTagMonitorService.ParseAddressFull(req.Address) == null)
+            err = $"주소 형식을 해석할 수 없습니다: '{req.Address}' (예: D100, M50)";
+        if (err == null && await repo.GetByIdAsync(req.PlcId.Trim()) == null)
+            err = $"존재하지 않는 PLC ID입니다: '{req.PlcId}'";
+        // folder_id는 실제 DB 외래키가 없어(catch(IsFkRestrict) 코드는 그래서 여태 발동한 적이 없었음)
+        // 존재하지 않는 폴더로도 그냥 저장돼버렸다(실제로 확인됨) — 여기서 직접 존재를 확인한다.
+        if (err == null && !await FolderExistsAsync(repo, req.FolderId))
+            err = $"존재하지 않는 폴더입니다: folderId={req.FolderId}";
+        // 같은 폴더 안에 이름이 겹치면 이름으로 값쓰기(write/by-name)가 folderId를 줘도 후보를
+        // 좁힐 수 없어 영구히 막히는 문제가 실제로 재현됨 — 애초에 저장을 막아 이 상황 자체를 없앤다.
+        if (err == null && await DwNameExistsInFolderAsync(repo, req.FolderId, req.Name.Trim(), excludeId))
+            err = $"같은 폴더 안에 이미 같은 이름의 태그가 있습니다: '{req.Name.Trim()}'";
+        return err;
+    }
+
+    private static async Task<bool> FolderExistsAsync(PlcRepository repo, int folderId)
+    {
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        using var cmd = new MySqlCommand("SELECT COUNT(*) FROM folders WHERE id=@id", conn);
+        cmd.Parameters.AddWithValue("@id", folderId);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync()) > 0;
+    }
+
+    private static async Task<bool> DwNameExistsInFolderAsync(PlcRepository repo, int folderId, string name, int? excludeId)
+    {
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        await EnsureDwTagTableAsync(conn);
+        string sql = "SELECT COUNT(*) FROM dw_folders_tags WHERE folder_id=@fid AND name=@name" + (excludeId.HasValue ? " AND id<>@exid" : "");
+        using var cmd = new MySqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@fid", folderId);
+        cmd.Parameters.AddWithValue("@name", name);
+        if (excludeId.HasValue) cmd.Parameters.AddWithValue("@exid", excludeId.Value);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync()) > 0;
+    }
+
+    private static async Task<bool> StringNameExistsInFolderAsync(PlcRepository repo, int folderId, string name, int? excludeId)
+    {
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        await EnsureStringTagTableAsync(conn);
+        string sql = "SELECT COUNT(*) FROM tb_string_tag WHERE folder_id=@fid AND tag_name=@name" + (excludeId.HasValue ? " AND string_id<>@exid" : "");
+        using var cmd = new MySqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@fid", folderId);
+        cmd.Parameters.AddWithValue("@name", name);
+        if (excludeId.HasValue) cmd.Parameters.AddWithValue("@exid", excludeId.Value);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync()) > 0;
+    }
+
+    private static async Task EnsureDwTagTableAsync(MySqlConnection conn)
+    {
+        using var cmd = new MySqlCommand(@"
+CREATE TABLE IF NOT EXISTS dw_folders_tags (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    folder_id   INT NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    address     VARCHAR(50) NOT NULL,
+    plc_id      VARCHAR(50) NOT NULL,
+    word_count  INT NOT NULL DEFAULT 2,
+    word_order  VARCHAR(30) NOT NULL DEFAULT '0,1',
+    signed_val  TINYINT(1) NOT NULL DEFAULT 1,
+    enabled     TINYINT(1) NOT NULL DEFAULT 1,
+    INDEX idx_dw_folder (folder_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private sealed record DwTagRow(int Id, int FolderId, string Name, string Address, string PlcId, int WordCount, string WordOrder, bool Signed, bool Enabled);
+
+    private static async Task<List<DwTagRow>> QueryDwTags(PlcRepository repo, int? folderId, string? name = null)
+    {
+        var list = new List<DwTagRow>();
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        await EnsureDwTagTableAsync(conn);
+        string sql = "SELECT id, folder_id, name, address, plc_id, word_count, word_order, signed_val, enabled FROM dw_folders_tags";
+        var conditions = new List<string>();
+        if (folderId.HasValue) conditions.Add("folder_id=@fid");
+        if (!string.IsNullOrWhiteSpace(name)) conditions.Add("name=@name");
+        if (conditions.Count > 0) sql += " WHERE " + string.Join(" AND ", conditions);
+        sql += " ORDER BY id";
+        using var cmd = new MySqlCommand(sql, conn);
+        if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+        if (!string.IsNullOrWhiteSpace(name)) cmd.Parameters.AddWithValue("@name", name);
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+            list.Add(new DwTagRow(
+                rd.GetInt32(0), rd.GetInt32(1), rd.GetString(2), rd.GetString(3), rd.GetString(4),
+                rd.GetInt32(5), rd.GetString(6), rd.GetBoolean(7), rd.GetBoolean(8)));
+        return list;
+    }
+
+    // ================= 문자열 태그 (tb_string_tag) =================
+    // 온도 태그처럼 폴더 없이 플랫 목록으로 관리한다. 값 자체는 StringTagMonitorService가 30초
+    // 주기로 미리 읽어 디코딩해서 메모리에 들고 있고, 여기서는 그 결과만 꺼내 보여준다(폴더/알람/
+    // 온도 태그의 monitor 엔드포인트와 동일한 패턴).
+    private static void MapStringTagEndpoints(WebApplication app)
+    {
+        // GET /api/admin/stringtags?folderId=&name= (생략 시 전체) — 목록 + 현재 디코딩된 값
+        app.MapGet("/api/admin/stringtags", async (int? folderId, string? name, PlcRepository repo, StringTagMonitorService monitor) =>
+        {
+            try
+            {
+                var list = await QueryStringTags(repo, folderId, name);
+                var tags = list.Select(t => new
+                {
+                    stringId = t.StringId,
+                    folderId = t.FolderId,
+                    tagName = t.TagName,
+                    address = t.Address,
+                    plcId = t.PlcId,
+                    wordCount = t.WordCount,
+                    byteOrder = t.ByteOrder,
+                    enabled = t.Enabled,
+                    value = monitor.StringTagValues.TryGetValue(t.StringId, out var v) ? v : null
+                });
+                return Results.Ok(new { success = true, lastPollAt = monitor.LastPollAt, tags });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/stringtags/count?folderId= — 개수만 (더블워드 태그와 동일 패턴)
+        app.MapGet("/api/admin/stringtags/count", async (int? folderId, PlcRepository repo) =>
+        {
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                await EnsureStringTagTableAsync(conn);
+                string sql = "SELECT COUNT(*) FROM tb_string_tag" + (folderId.HasValue ? " WHERE folder_id=@fid" : "");
+                using var cmd = new MySqlCommand(sql, conn);
+                if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+                long count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                return Results.Ok(new { success = true, count });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/stringtags/export?folderId= (생략 시 전체) — 엑셀 다운로드
+        app.MapGet("/api/admin/stringtags/export", async (int? folderId, PlcRepository repo) =>
+        {
+            var list = await QueryStringTags(repo, folderId);
+            var rows = list.Select(t => new object?[] { t.StringId, t.FolderId, t.TagName, t.Address, t.PlcId, t.WordCount, t.ByteOrder, t.Enabled ? 1 : 0 });
+            var bytes = WriteXlsx("문자열태그", new[] { "ID", "폴더ID", "태그이름", "주소", "PLC ID", "워드개수", "바이트순서", "사용(1/0)" }, rows);
+            return Results.File(bytes, XlsxContentType, $"string_tags_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+        });
+
+        // POST /api/admin/stringtags/import?folderId= — 엑셀 업로드로 일괄 등록/수정
+        app.MapPost("/api/admin/stringtags/import", async (IFormFile file, int? folderId, PlcRepository repo) =>
+        {
+            List<Dictionary<string, string>> rows;
+            try
+            {
+                using var stream = file.OpenReadStream();
+                rows = ReadXlsxRows(stream);
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = "엑셀 파일을 읽을 수 없습니다: " + ex.Message }); }
+
+            int inserted = 0, updated = 0;
+            var errors = new List<string>();
+            using var conn = new MySqlConnection(repo.ConnectionString);
+            await conn.OpenAsync();
+            await EnsureStringTagTableAsync(conn);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                int excelRow = i + 2;
+                string tagName = row.GetValueOrDefault("태그이름", "");
+                string address = row.GetValueOrDefault("주소", "");
+                string plcId = row.GetValueOrDefault("PLC ID", "");
+                int wordCount = int.TryParse(row.GetValueOrDefault("워드개수", ""), out var wc) ? wc : 8;
+                string byteOrder = row.GetValueOrDefault("바이트순서", "");
+                if (byteOrder != StringTagCodec.LowFirst) byteOrder = StringTagCodec.HighFirst;
+                bool enabled = ParseEnabledCell(row.GetValueOrDefault("사용(1/0)", ""));
+                int? fid = int.TryParse(row.GetValueOrDefault("폴더ID", ""), out var pf) ? pf : folderId;
+                bool hasId = int.TryParse(row.GetValueOrDefault("ID", ""), out var id) && id > 0;
+
+                var err = ValidateTagBasics(tagName, address, plcId);
+                if (err == null && wordCount < 1) err = "워드 개수는 1 이상이어야 합니다";
+                if (err == null && wordCount > 60) err = "워드 개수가 너무 큽니다(최대 60)";
+                if (err == null && fid == null) err = "폴더ID가 없고 기본 폴더도 지정되지 않았습니다";
+                if (err == null && LiveTagMonitorService.ParseAddressFull(address) == null) err = $"주소 형식을 해석할 수 없습니다: '{address}'";
+                if (err == null && await repo.GetByIdAsync(plcId.Trim()) == null) err = $"존재하지 않는 PLC ID입니다: '{plcId}'";
+                if (err == null && fid != null && !await FolderExistsAsync(repo, fid.Value)) err = $"존재하지 않는 폴더입니다: folderId={fid}";
+                if (err == null && fid != null && await StringNameExistsInFolderAsync(repo, fid.Value, tagName.Trim(), hasId ? id : (int?)null))
+                    err = $"같은 폴더 안에 이미 같은 이름의 태그가 있습니다: '{tagName.Trim()}'";
+                if (err != null) { errors.Add($"{excelRow}행: {err}"); continue; }
+
+                try
+                {
+                    if (hasId)
+                    {
+                        using var cmd = new MySqlCommand(@"
+UPDATE tb_string_tag SET folder_id=@fid, tag_name=@tn, address=@addr, plc_id=@plc,
+       word_count=@wc, byte_order=@bo, enabled=@en
+ WHERE string_id=@id", conn);
+                        cmd.Parameters.AddWithValue("@fid", fid);
+                        cmd.Parameters.AddWithValue("@tn", tagName.Trim());
+                        cmd.Parameters.AddWithValue("@addr", address.Trim());
+                        cmd.Parameters.AddWithValue("@plc", plcId.Trim());
+                        cmd.Parameters.AddWithValue("@wc", wordCount);
+                        cmd.Parameters.AddWithValue("@bo", byteOrder);
+                        cmd.Parameters.AddWithValue("@en", enabled);
+                        cmd.Parameters.AddWithValue("@id", id);
+                        int n = await cmd.ExecuteNonQueryAsync();
+                        if (n > 0) updated++; else errors.Add($"{excelRow}행: ID {id}인 태그를 찾을 수 없습니다");
+                    }
+                    else
+                    {
+                        using var cmd = new MySqlCommand(@"
+INSERT INTO tb_string_tag(folder_id, tag_name, address, plc_id, word_count, byte_order, enabled)
+VALUES (@fid, @tn, @addr, @plc, @wc, @bo, @en)", conn);
+                        cmd.Parameters.AddWithValue("@fid", fid);
+                        cmd.Parameters.AddWithValue("@tn", tagName.Trim());
+                        cmd.Parameters.AddWithValue("@addr", address.Trim());
+                        cmd.Parameters.AddWithValue("@plc", plcId.Trim());
+                        cmd.Parameters.AddWithValue("@wc", wordCount);
+                        cmd.Parameters.AddWithValue("@bo", byteOrder);
+                        cmd.Parameters.AddWithValue("@en", enabled);
+                        await cmd.ExecuteNonQueryAsync();
+                        inserted++;
+                    }
+                }
+                catch (MySqlException ex) when (IsFkRestrict(ex)) { errors.Add($"{excelRow}행: 존재하지 않는 폴더입니다"); }
+                catch (Exception ex) { errors.Add($"{excelRow}행: {ex.Message}"); }
+            }
+
+            return Results.Ok(new { success = true, inserted, updated, errors });
+        }).DisableAntiforgery();
+
+        // POST /api/admin/stringtags  body: { folderId, tagName, address, plcId, wordCount, byteOrder, enabled? }
+        app.MapPost("/api/admin/stringtags", async (StringTagRequest req, PlcRepository repo) =>
+        {
+            var err = await ValidateStringTagBasicsAsync(req, repo);
+            if (err != null) return Results.Ok(new { success = false, error = err });
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                await EnsureStringTagTableAsync(conn);
+                using var cmd = new MySqlCommand(@"
+INSERT INTO tb_string_tag(folder_id, tag_name, address, plc_id, word_count, byte_order, enabled)
+VALUES (@folderId, @tagName, @address, @plcId, @wordCount, @byteOrder, @enabled)", conn);
+                cmd.Parameters.AddWithValue("@folderId", req.FolderId);
+                cmd.Parameters.AddWithValue("@tagName", req.TagName.Trim());
+                cmd.Parameters.AddWithValue("@address", req.Address.Trim());
+                cmd.Parameters.AddWithValue("@plcId", req.PlcId.Trim());
+                cmd.Parameters.AddWithValue("@wordCount", req.WordCount);
+                cmd.Parameters.AddWithValue("@byteOrder", req.ByteOrder);
+                cmd.Parameters.AddWithValue("@enabled", req.Enabled ?? true);
+                await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = true, id = (int)cmd.LastInsertedId });
+            }
+            catch (MySqlException ex) when (IsFkRestrict(ex))
+            { return Results.Ok(new { success = false, error = "존재하지 않는 폴더입니다" }); }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // PUT /api/admin/stringtags/{id}
+        app.MapPut("/api/admin/stringtags/{id:int}", async (int id, StringTagRequest req, PlcRepository repo) =>
+        {
+            var err = await ValidateStringTagBasicsAsync(req, repo, id);
+            if (err != null) return Results.Ok(new { success = false, error = err });
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                using var cmd = new MySqlCommand(@"
+UPDATE tb_string_tag SET folder_id=@folderId, tag_name=@tagName, address=@address, plc_id=@plcId,
+       word_count=@wordCount, byte_order=@byteOrder, enabled=@enabled
+ WHERE string_id=@id", conn);
+                cmd.Parameters.AddWithValue("@folderId", req.FolderId);
+                cmd.Parameters.AddWithValue("@tagName", req.TagName.Trim());
+                cmd.Parameters.AddWithValue("@address", req.Address.Trim());
+                cmd.Parameters.AddWithValue("@plcId", req.PlcId.Trim());
+                cmd.Parameters.AddWithValue("@wordCount", req.WordCount);
+                cmd.Parameters.AddWithValue("@byteOrder", req.ByteOrder);
+                cmd.Parameters.AddWithValue("@enabled", req.Enabled ?? true);
+                cmd.Parameters.AddWithValue("@id", id);
+                int n = await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = n > 0 });
+            }
+            catch (MySqlException ex) when (IsFkRestrict(ex))
+            { return Results.Ok(new { success = false, error = "존재하지 않는 폴더입니다" }); }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // DELETE /api/admin/stringtags/{id}
+        app.MapDelete("/api/admin/stringtags/{id:int}", async (int id, PlcRepository repo) =>
+        {
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                using var cmd = new MySqlCommand("DELETE FROM tb_string_tag WHERE string_id=@id", conn);
+                cmd.Parameters.AddWithValue("@id", id);
+                int n = await cmd.ExecuteNonQueryAsync();
+                return Results.Ok(new { success = n > 0 });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
+        // GET /api/admin/stringtags/write/by-name?name=&value=&folderId= — 문자열을 워드로 인코딩해서 순서대로 씀.
+        //   각 워드는 기존 WriteWordAsync(쓰기 후 재확인 로직 포함)를 그대로 재사용한다.
+        app.MapGet("/api/admin/stringtags/write/by-name", async (string name, string value, int? folderId, PlcRepository repo, PlcServiceCache cache, StringTagMonitorService monitor) =>
+        {
+            // 아스키(공백~물결, 0x20~0x7E) 범위를 벗어나는 문자(한글 등)를 그대로 인코딩하면
+            // Encoding.ASCII.GetBytes가 조용히 '?'로 바꿔버려서, 사용자는 한글을 썼다고 생각하는데
+            // 실제로는 전혀 다른(그리고 알아볼 수 없는) 값이 PLC에 써지는 문제가 생긴다 — 저장 자체를
+            // 막고 명확한 에러로 알려준다.
+            if (value != null && value.Any(c => c < 0x20 || c > 0x7E))
+                return Results.Ok(new { success = false, error = "아스키(영문/숫자/기호) 문자만 쓸 수 있습니다 — 한글 등은 이 PLC 문자열 저장 방식(1바이트 아스키)으로 표현할 수 없습니다." });
+
+            var list = await QueryStringTags(repo, folderId, name);
+            if (list.Count == 0)
+                return Results.Ok(new { success = false, error = $"문자열 태그를 찾을 수 없음: name='{name}'" });
+            // 이제 폴더로 나뉘어 있어서 같은 이름이 여러 폴더에 걸쳐 있을 수 있다 — 어느 걸 쓸지
+            // 서버가 임의로 고르면 사용자 의도와 다른 태그에 쓸 위험이 있어(실제로 코드 리뷰에서
+            // 확인됨), 알람 태그와 동일하게 후보만 보여주고 쓰기는 거부한다.
+            if (list.Count > 1)
+                return Results.Ok(new
+                {
+                    success = false,
+                    error = $"'{name}'이 {list.Count}개 폴더에 걸쳐 있어 특정할 수 없음 — folderId를 같이 지정하세요.",
+                    candidates = list.Select(t => new { t.StringId, t.FolderId, t.Address, t.PlcId })
+                });
+            var tag = list[0];
+
+            var cfg = await repo.GetByIdAsync(tag.PlcId);
+            if (cfg == null) return Results.Ok(new { success = false, error = $"tb_plc에 '{tag.PlcId}'가 없음" });
+
+            var parsed = LiveTagMonitorService.ParseAddressFull(tag.Address);
+            if (parsed == null) return Results.Ok(new { success = false, error = $"주소 형식을 해석할 수 없음: '{tag.Address}'" });
+
+            var (words, truncated) = StringTagCodec.Encode(value, tag.WordCount, tag.ByteOrder);
+            try
+            {
+                var svc = cache.GetOrCreate(cfg);
+                for (int i = 0; i < words.Length; i++)
+                    await svc.WriteWordAsync(parsed.Value.Addr + i, words[i], parsed.Value.Device);
+
+                // StringTagMonitorService는 30초마다만 캐시(StringTagValues)를 갱신한다 — 방금 쓴
+                // 값을 그 다음 폴링까지 기다리지 않고 여기서 바로 반영해야, 화면에서 쓰기 직후
+                // 새로고침해도 "안 바뀐 것처럼" 보이는 문제(실제로 확인됨)가 생기지 않는다. 실제로
+                // 쓴 워드를 그대로 디코딩해서 넣으므로 다음 정식 폴링과도 값이 어긋나지 않는다.
+                monitor.StringTagValues[tag.StringId] = StringTagCodec.Decode(words, tag.ByteOrder);
+
+                return Results.Ok(new { success = true, name, plcId = tag.PlcId, address = tag.Address, value, truncated });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+    }
+
+    private static async Task<string?> ValidateStringTagBasicsAsync(StringTagRequest req, PlcRepository repo, int? excludeId = null)
+    {
+        var err = ValidateTagBasics(req.TagName, req.Address, req.PlcId);
+        if (err == null && req.WordCount < 1) err = "워드 개수는 1 이상이어야 합니다";
+        if (err == null && req.WordCount > 60) err = "워드 개수가 너무 큽니다(최대 60)";
+        if (err == null && req.ByteOrder != StringTagCodec.HighFirst && req.ByteOrder != StringTagCodec.LowFirst) err = "바이트 순서 값이 올바르지 않습니다";
+        // 더블워드 태그와 동일한 이유 — 저장 시점에 주소/PLC 존재 여부를 미리 막아야 영원히
+        // value:null인 채로 원인 모르게 남는 태그가 생기지 않는다.
+        if (err == null && LiveTagMonitorService.ParseAddressFull(req.Address) == null)
+            err = $"주소 형식을 해석할 수 없습니다: '{req.Address}' (예: D100, M50)";
+        if (err == null && await repo.GetByIdAsync(req.PlcId.Trim()) == null)
+            err = $"존재하지 않는 PLC ID입니다: '{req.PlcId}'";
+        if (err == null && !await FolderExistsAsync(repo, req.FolderId))
+            err = $"존재하지 않는 폴더입니다: folderId={req.FolderId}";
+        if (err == null && await StringNameExistsInFolderAsync(repo, req.FolderId, req.TagName.Trim(), excludeId))
+            err = $"같은 폴더 안에 이미 같은 이름의 태그가 있습니다: '{req.TagName.Trim()}'";
+        return err;
+    }
+
+    private static async Task EnsureStringTagTableAsync(MySqlConnection conn)
+    {
+        using (var cmd = new MySqlCommand(@"
+CREATE TABLE IF NOT EXISTS tb_string_tag (
+    string_id   INT AUTO_INCREMENT PRIMARY KEY,
+    folder_id   INT NOT NULL DEFAULT 4,
+    tag_name    VARCHAR(100) NOT NULL,
+    address     VARCHAR(50) NOT NULL,
+    plc_id      VARCHAR(50) NOT NULL,
+    word_count  INT NOT NULL DEFAULT 8,
+    byte_order  VARCHAR(20) NOT NULL DEFAULT 'HIGH_FIRST',
+    enabled     TINYINT(1) NOT NULL DEFAULT 1,
+    INDEX idx_string_folder (folder_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", conn))
+            await cmd.ExecuteNonQueryAsync();
+
+        // 문자열 태그가 처음엔 폴더 없이(플랫 목록) 나왔었는데, 나중에 모니터링 태그처럼 folders로
+        // 묶어달라는 요청이 와서 기존 테이블에 컬럼을 추가한다 — 이미 있으면 조용히 넘어간다.
+        // 기존 행은 "test" 폴더(id=4, 이 환경에 이미 있는 테스트용 폴더)로 기본 배정한다.
+        using (var alter = new MySqlCommand(
+            "ALTER TABLE tb_string_tag ADD COLUMN IF NOT EXISTS folder_id INT NOT NULL DEFAULT 4 AFTER string_id", conn))
+            await alter.ExecuteNonQueryAsync();
+    }
+
+    private sealed record StringTagRow(int StringId, int FolderId, string TagName, string Address, string PlcId, int WordCount, string ByteOrder, bool Enabled);
+
+    private static async Task<List<StringTagRow>> QueryStringTags(PlcRepository repo, int? folderId, string? name = null)
+    {
+        var list = new List<StringTagRow>();
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        await EnsureStringTagTableAsync(conn);
+        string sql = "SELECT string_id, folder_id, tag_name, address, plc_id, word_count, byte_order, enabled FROM tb_string_tag";
+        var conditions = new List<string>();
+        if (folderId.HasValue) conditions.Add("folder_id=@fid");
+        if (!string.IsNullOrWhiteSpace(name)) conditions.Add("tag_name=@name");
+        if (conditions.Count > 0) sql += " WHERE " + string.Join(" AND ", conditions);
+        sql += " ORDER BY string_id";
+        using var cmd = new MySqlCommand(sql, conn);
+        if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+        if (!string.IsNullOrWhiteSpace(name)) cmd.Parameters.AddWithValue("@name", name);
+        using var rd = await cmd.ExecuteReaderAsync();
+        while (await rd.ReadAsync())
+            list.Add(new StringTagRow(
+                rd.GetInt32(0), rd.GetInt32(1), rd.GetString(2), rd.GetString(3), rd.GetString(4), rd.GetInt32(5), rd.GetString(6), rd.GetBoolean(7)));
+        return list;
     }
 
     // ================= 실시간 모니터링 — PLC를 새로 두드리지 않고, LiveTagMonitorService/
@@ -69,12 +785,17 @@ public static class AdminTagEndpoints
             catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
         });
 
-        // GET /api/admin/monitor/alarmtags?folderId= (생략 시 전체) — AlarmTagValues(메모리, ON/OFF) 그대로 조회
-        app.MapGet("/api/admin/monitor/alarmtags", async (int? folderId, LiveTagMonitorService monitor, PlcRepository repo) =>
+        // GET /api/admin/monitor/alarmtags?folderId=&name= (둘 다 생략 시 전체) — AlarmTagValues(메모리, ON/OFF) 그대로 조회
+        // name을 주면 그 이름 하나로 정확히 좁혀서 반환한다 — AI 어시스턴트가 태그 하나의 상태만 물을 때
+        // 전체 목록(238개 등)을 받아 앞부분만 잘려서 놓치는 일이 없도록 하기 위함.
+        // onOnly=true면 현재 ON 상태인 태그만 걸러서 반환한다 — "지금 켜져있는 알람 있어?" 같은 질문에
+        // 전체 목록을 다 주면(TrimForLlm이 앞 40개만 넘김) 41번째 이후에서 켜진 알람을 놓칠 수 있어서,
+        // 그 경우엔 이 필터로 ON인 것만 추려 애초에 40개 미만이 되게 한다(보통 ON은 소수뿐).
+        app.MapGet("/api/admin/monitor/alarmtags", async (int? folderId, string? name, string? equipId, bool? onOnly, LiveTagMonitorService monitor, PlcRepository repo) =>
         {
             try
             {
-                var list = await QueryAlarmTags(repo, folderId);
+                var list = await QueryAlarmTags(repo, folderId, name, equipId);
                 var tags = list.Select(t => new
                 {
                     tagId = t.TagId,
@@ -86,6 +807,7 @@ public static class AdminTagEndpoints
                     level = t.Level,
                     isOn = monitor.AlarmTagValues.TryGetValue(t.TagId, out var v) ? (bool?)v : null
                 });
+                if (onOnly == true) tags = tags.Where(t => t.isOn == true);
                 return Results.Ok(new { success = true, lastPollAt = monitor.LastPollAt, tags });
             }
             catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
@@ -476,15 +1198,51 @@ UPDATE tb_plc SET ip=@ip, port=@port, plc_type=@type, label=@label, enabled=@ena
         });
 
         // DELETE /api/admin/plcs/{id}
+        // PLC를 지우면 그 PLC를 참조 중인 태그들의 plc_id도 FK 없이 그냥 끊어져서(dw_folders_tags/
+        // tb_string_tag는 물론 folders_tags/tb_temp_tag/tb_alarm_tag도 plc_id에 FK가 없음) 이후
+        // JOIN이 안 돼 조용히 영원히 폴링 안 되는 태그가 남는다 — 폴더 삭제 때 고쳤던 것과 같은
+        // 문제라, 여기서는 캐스케이드 삭제 대신(태그 개수가 훨씬 많을 수 있어 더 위험) 사용 중이면
+        // 삭제 자체를 막는 쪽을 택했다.
         app.MapDelete("/api/admin/plcs/{id}", async (string id, PlcRepository repo) =>
         {
             try
             {
+                var refs = await CountPlcReferencesAsync(repo, id);
+                var inUse = refs.Where(kv => kv.Value > 0).ToList();
+                if (inUse.Count > 0)
+                {
+                    string detail = string.Join(", ", inUse.Select(kv => $"{kv.Key} {kv.Value}개"));
+                    return Results.Ok(new { success = false, error = $"이 PLC를 사용 중인 태그가 있어 삭제할 수 없습니다 — {detail}. 먼저 해당 태그들을 삭제하거나 다른 PLC로 옮기세요." });
+                }
                 bool ok = await repo.RemoveAsync(id);
                 return Results.Ok(new { success = ok });
             }
             catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
         });
+    }
+
+    private static async Task<Dictionary<string, int>> CountPlcReferencesAsync(PlcRepository repo, string plcId)
+    {
+        using var conn = new MySqlConnection(repo.ConnectionString);
+        await conn.OpenAsync();
+        await EnsureDwTagTableAsync(conn);
+        await EnsureStringTagTableAsync(conn);
+
+        async Task<int> CountFrom(string table, string col)
+        {
+            using var cmd = new MySqlCommand($"SELECT COUNT(*) FROM {table} WHERE {col}=@id", conn);
+            cmd.Parameters.AddWithValue("@id", plcId);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        }
+
+        return new Dictionary<string, int>
+        {
+            ["모니터링 태그"] = await CountFrom("folders_tags", "plc_id"),
+            ["온도 태그"] = await CountFrom("tb_temp_tag", "plc_id"),
+            ["알람 태그"] = await CountFrom("tb_alarm_tag", "plc_id"),
+            ["더블워드 태그"] = await CountFrom("dw_folders_tags", "plc_id"),
+            ["문자열 태그"] = await CountFrom("tb_string_tag", "plc_id"),
+        };
     }
 
     private static string? ValidatePlcBasics(string? plcId, string? ip, string? label, string? plcType, int port)
@@ -564,12 +1322,24 @@ UPDATE tb_plc SET ip=@ip, port=@port, plc_type=@type, label=@label, enabled=@ena
         //   주의: folders_tags.folder_id와 folders.parent_id 둘 다 FK가 ON DELETE CASCADE라,
         //   이 폴더 삭제는 안의 태그/하위 폴더까지 DB가 조용히 함께 지운다(막아주지 않음).
         //   그래서 되돌릴 수 없는 개수 경고는 프론트(tags.js)가 삭제 전 태그 목록을 먼저 조회해서 보여준다.
+        //
+        //   dw_folders_tags/tb_string_tag는 folders를 나중에(각각 이 파일 안에서) 공유해서 쓰게 됐는데
+        //   FK 제약 없이 folder_id만 저장해서, 폴더를 지워도 이 두 테이블 행은 조용히 안 지워지고
+        //   존재하지 않는 folder_id를 가진 채로 남는(고아 행) 문제가 실제로 확인됐다 — 화면 확인창은
+        //   "태그도 같이 삭제된다"고 안내하는데 실제로는 안 지워지는 불일치였다. 여기서 명시적으로
+        //   같이 지워서 folders_tags와 동일한 동작(폴더 삭제 = 안의 태그도 삭제)을 보장한다.
         app.MapDelete("/api/admin/folders/{id:int}", async (int id, PlcRepository repo) =>
         {
             try
             {
                 using var conn = new MySqlConnection(repo.ConnectionString);
                 await conn.OpenAsync();
+                await EnsureDwTagTableAsync(conn);
+                await EnsureStringTagTableAsync(conn);
+                using (var delDw = new MySqlCommand("DELETE FROM dw_folders_tags WHERE folder_id=@id", conn))
+                { delDw.Parameters.AddWithValue("@id", id); await delDw.ExecuteNonQueryAsync(); }
+                using (var delStr = new MySqlCommand("DELETE FROM tb_string_tag WHERE folder_id=@id", conn))
+                { delStr.Parameters.AddWithValue("@id", id); await delStr.ExecuteNonQueryAsync(); }
                 using var cmd = new MySqlCommand("DELETE FROM folders WHERE id=@id", conn);
                 cmd.Parameters.AddWithValue("@id", id);
                 int n = await cmd.ExecuteNonQueryAsync();
@@ -582,6 +1352,25 @@ UPDATE tb_plc SET ip=@ip, port=@port, plc_type=@type, label=@label, enabled=@ena
     // ================= 모니터링 태그 (folders_tags) =================
     private static void MapFolderTagEndpoints(WebApplication app)
     {
+        // GET /api/admin/foldertags/count?folderId=4 (생략 시 전체) — 개수만 필요한 질문 전용.
+        // AI 어시스턴트가 "태그 몇 개야?" 질문에 list_folder_tags(태그 40개 분량 데이터 + note)를 쓰면
+        // 작은 모델이 데이터량에 압도돼 답을 아예 못 만드는 경우가 실제로 확인돼서, 개수 하나만
+        // 가볍게 돌려주는 전용 경로를 따로 둔다.
+        app.MapGet("/api/admin/foldertags/count", async (int? folderId, PlcRepository repo) =>
+        {
+            try
+            {
+                using var conn = new MySqlConnection(repo.ConnectionString);
+                await conn.OpenAsync();
+                string sql = "SELECT COUNT(*) FROM folders_tags" + (folderId.HasValue ? " WHERE folder_id=@fid" : "");
+                using var cmd = new MySqlCommand(sql, conn);
+                if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+                long count = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+                return Results.Ok(new { success = true, count });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
         // GET /api/admin/foldertags?folderId=4 (생략 시 전체 폴더 통틀어 전부) — 관리 화면용 "정의" 목록
         // (값이 아니라 정의. 값 조회는 /api/foldertag/values)
         app.MapGet("/api/admin/foldertags", async (int? folderId, PlcRepository repo) =>
@@ -1067,10 +1856,18 @@ UPDATE tb_temp_tag SET tag_name=@tagName, address=@address, plc_id=@plcId, col_n
         using var conn = new MySqlConnection(repo.ConnectionString);
         await conn.OpenAsync();
         string sql = "SELECT temp_id, tag_name, address, plc_id, col_name, trend_name, scale, equip_id, enabled FROM tb_temp_tag";
-        if (!string.IsNullOrWhiteSpace(equipId)) sql += " WHERE equip_id=@equipId";
+        // equipId 인자로 설비명(BCF1 등)뿐 아니라 존 이름("1존" 등)이 실려 오는 경우가 실제로 확인됨
+        // (AI 어시스턴트가 "1존 온도 몇 도야?"를 equipId="1존"으로 호출) — equip_id 정확 일치 외에
+        // trend_name/tag_name 부분일치도 같이 봐서, 설비를 특정하지 않고 존 이름만 물어도 해당 존을
+        // 가진 모든 설비를 찾을 수 있게 한다.
+        if (!string.IsNullOrWhiteSpace(equipId)) sql += " WHERE (equip_id=@equipId OR trend_name LIKE @equipLike OR tag_name LIKE @equipLike)";
         sql += " ORDER BY temp_id";
         using var cmd = new MySqlCommand(sql, conn);
-        if (!string.IsNullOrWhiteSpace(equipId)) cmd.Parameters.AddWithValue("@equipId", equipId);
+        if (!string.IsNullOrWhiteSpace(equipId))
+        {
+            cmd.Parameters.AddWithValue("@equipId", equipId);
+            cmd.Parameters.AddWithValue("@equipLike", $"%{equipId}%");
+        }
         using var rd = await cmd.ExecuteReaderAsync();
         while (await rd.ReadAsync())
             list.Add(new TempTagRow(
@@ -1176,6 +1973,47 @@ UPDATE tb_temp_tag SET tag_name=@tagName, address=@address, plc_id=@plcId, col_n
     // ================= 알람 태그 (tb_alarm_tag) =================
     private static void MapAlarmTagEndpoints(WebApplication app)
     {
+        // GET /api/admin/alarmtags/write/by-name?name=ALARM_102&value=0
+        //   Program.cs의 /api/foldertag/write/by-name과 동일한 패턴이지만 tb_alarm_tag 대상.
+        //   AI 어시스턴트가 "이 알람 꺼줘/0으로 만들어줘"를 write_folder_tag로 잘못 시도해 "태그를
+        //   찾을 수 없음"으로 실패하는 문제가 실제로 확인돼서(ALARM_102는 folders_tags가 아니라
+        //   tb_alarm_tag에만 있음) 알람 전용 쓰기 경로를 별도로 둔다. 이름으로 주소/PLC를 찾은 뒤
+        //   실제 쓰기는 폴더 태그와 동일한 WriteBitAsync/WriteWordAsync(read-back 검증 포함)를 쓴다.
+        app.MapGet("/api/admin/alarmtags/write/by-name", async (string name, int value, int? folderId, string? equipId, PlcRepository repo, PlcServiceCache cache, LiveTagMonitorService monitor) =>
+        {
+            var found = await QueryAlarmTags(repo, folderId, name, equipId);
+            if (found.Count == 0)
+                return Results.Ok(new { success = false, error = $"알람 태그를 찾을 수 없음: name='{name}'" });
+            if (found.Count > 1)
+                return Results.Ok(new
+                {
+                    success = false,
+                    error = $"'{name}'에 해당하는 알람이 {found.Count}개 설비에 걸쳐 있어 특정할 수 없음 — 어느 설비인지 equipId로 같이 지정하세요.",
+                    candidates = found.Select(t => new { t.TagId, equipId = t.FolderName, t.Address, t.PlcId })
+                });
+
+            var tag = found[0];
+            var cfg = await repo.GetByIdAsync(tag.PlcId);
+            if (cfg == null) return Results.Ok(new { success = false, error = $"tb_plc에 '{tag.PlcId}'가 없음" });
+
+            var parsed = LiveTagMonitorService.ParseAddressFull(tag.Address);
+            if (parsed == null) return Results.Ok(new { success = false, error = $"주소 형식을 해석할 수 없음: '{tag.Address}'" });
+
+            try
+            {
+                var svc = cache.GetOrCreate(cfg);
+                bool isBit = "MLXYBS".Contains(parsed.Value.Device, StringComparison.OrdinalIgnoreCase);
+                monitor.AlarmTagValues.TryGetValue(tag.TagId, out var wasOn);
+
+                if (isBit) await svc.WriteBitAsync(parsed.Value.Addr, value != 0, parsed.Value.Device);
+                else await svc.WriteWordAsync(parsed.Value.Addr, value, parsed.Value.Device);
+
+                await TagWriteLog.LogAsync(repo.ConnectionString, "ALARM", tag.TagId, name, tag.Address, tag.PlcId, wasOn ? 1 : 0, value);
+                return Results.Ok(new { success = true, name, plcId = tag.PlcId, address = tag.Address, type = isBit ? "BIT" : "WORD", value, wasOn });
+            }
+            catch (Exception ex) { return Results.Ok(new { success = false, error = ex.Message }); }
+        });
+
         // folderId 생략 시 전체 알람 폴더 통틀어 전부
         app.MapGet("/api/admin/alarmtags", async (int? folderId, PlcRepository repo) =>
         {
@@ -1346,7 +2184,15 @@ UPDATE tb_alarm_tag SET folder_id=@folderId, tag_name=@tagName, address=@address
 
     private sealed record AlarmTagRow(int TagId, int FolderId, string FolderName, string TagName, string Address, string PlcId, string AlarmMsg, byte Level, bool Enabled);
 
-    private static async Task<List<AlarmTagRow>> QueryAlarmTags(PlcRepository repo, int? folderId)
+    // name을 지정하면 정확히 일치하는 태그만 DB에서 걸러서 반환한다 — 알람 태그가 (실사용 환경에서
+    // 238개처럼) 많을 때, 목록 전체를 가져와 앞부분만 잘라 보여주는 방식(TrimForLlm)으로는 뒤쪽에
+    // 있는 태그를 "없는 것"으로 오판할 수 있어(AI 어시스턴트에서 실제로 확인됨), 이름 하나만 정확히
+    // 찾을 땐 이 필터로 애초에 결과를 1건으로 좁힌다.
+    // name은 태그 이름(ALARM_102)뿐 아니라 알람 메시지(alarm_msg, 예: "본실 온도 과열")로도 매칭한다 —
+    // 현장 작업자는 태그 이름이 아니라 알람 문구로 물어보는 게 자연스럽기 때문. 같은 문구가 여러
+    // 설비(폴더)에 걸쳐 등록돼 있을 수 있어(예: "본실 온도 과열"이 BCF1~BCF5에 모두 있음) equipId로
+    // 설비명(BCF1 등, tb_alarm_folder.folder_name) 기준으로도 좁힐 수 있게 한다.
+    private static async Task<List<AlarmTagRow>> QueryAlarmTags(PlcRepository repo, int? folderId, string? name = null, string? equipId = null)
     {
         var list = new List<AlarmTagRow>();
         using var conn = new MySqlConnection(repo.ConnectionString);
@@ -1354,10 +2200,25 @@ UPDATE tb_alarm_tag SET folder_id=@folderId, tag_name=@tagName, address=@address
         string sql = @"
 SELECT t.tag_id, t.folder_id, f.folder_name, t.tag_name, t.address, t.plc_id, t.alarm_msg, t.level, t.enabled
   FROM tb_alarm_tag t JOIN tb_alarm_folder f ON t.folder_id = f.folder_id";
-        if (folderId.HasValue) sql += " WHERE t.folder_id=@fid";
+        var conditions = new List<string>();
+        if (folderId.HasValue) conditions.Add("t.folder_id=@fid");
+        if (!string.IsNullOrWhiteSpace(equipId)) conditions.Add("f.folder_name=@equip");
+        // 양방향 부분일치: "온도 과열"처럼 문구 일부만 줘도(alarm_msg가 name을 포함) 찾고, 반대로
+        // "예열 온도이상 알람"처럼 실제 alarm_msg 뒤에 "알람/태그" 같은 군더더기가 붙어도(name이
+        // alarm_msg를 포함) 찾는다 — AI 어시스턴트가 사용자 말투를 그대로 넘기다 보니 실제로 후자
+        // 패턴이 자주 나와서(예: alarm_msg="예열 온도이상"인데 name="예열 온도이상 알람") 한쪽만
+        // 검사하면 정확히 존재하는 알람도 못 찾는 게 확인됨.
+        if (!string.IsNullOrWhiteSpace(name)) conditions.Add("(t.tag_name=@name OR t.alarm_msg LIKE @nameLike OR INSTR(@name, t.alarm_msg) > 0)");
+        if (conditions.Count > 0) sql += " WHERE " + string.Join(" AND ", conditions);
         sql += " ORDER BY f.sort_order, t.tag_id";
         using var cmd = new MySqlCommand(sql, conn);
         if (folderId.HasValue) cmd.Parameters.AddWithValue("@fid", folderId.Value);
+        if (!string.IsNullOrWhiteSpace(equipId)) cmd.Parameters.AddWithValue("@equip", equipId);
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            cmd.Parameters.AddWithValue("@name", name);
+            cmd.Parameters.AddWithValue("@nameLike", $"%{name}%");
+        }
         using var rd = await cmd.ExecuteReaderAsync();
         while (await rd.ReadAsync())
             list.Add(new AlarmTagRow(
@@ -1383,3 +2244,5 @@ public record FolderTagRequest(int FolderId, string Name, string Address, string
 public record TempTagRequest(string TagName, string Address, string PlcId, string ColName, string? TrendName, string? Scale, string? EquipId, bool? Enabled);
 public record AlarmFolderRequest(string FolderName, int? ParentId, int? SortOrder);
 public record AlarmTagRequest(int FolderId, string TagName, string Address, string PlcId, string AlarmMsg, byte? Level, bool? Enabled);
+public record StringTagRequest(int FolderId, string TagName, string Address, string PlcId, int WordCount, string ByteOrder, bool? Enabled);
+public record DoubleWordTagRequest(int FolderId, string Name, string Address, string PlcId, int WordCount, string WordOrder, bool Signed, bool? Enabled);

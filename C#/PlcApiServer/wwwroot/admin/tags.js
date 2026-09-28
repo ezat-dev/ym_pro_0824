@@ -155,7 +155,7 @@ document.querySelectorAll('.subtab-btn').forEach(btn => {
 // ── PLC 드롭다운(3개 폼 공용) 채우기 ───────────────────────────────────────
 async function loadPlcOptions() {
   const { plcs } = await api('GET', '/api/admin/plcs');
-  const selects = [document.getElementById('ftPlcSelect'), document.getElementById('ttPlcSelect'), document.getElementById('atPlcSelect')];
+  const selects = [document.getElementById('ftPlcSelect'), document.getElementById('ttPlcSelect'), document.getElementById('atPlcSelect'), document.getElementById('stPlcSelect'), document.getElementById('dwPlcSelect')];
   const optionsHtml = '<option value="">PLC 선택...</option>' + plcs.map(p =>
     `<option value="${escapeHtml(p.plcId)}">${escapeHtml(p.plcId)} — ${escapeHtml(p.label)}${p.enabled ? '' : ' (비활성)'}</option>`
   ).join('');
@@ -343,6 +343,14 @@ async function loadFolders() {
   renderFolderTree(document.getElementById('folderList'), folders, selectedFolderId, folderTreeHandlers());
   const sel = document.getElementById('folderParentSelect');
   sel.innerHTML = '<option value="">(최상위)</option>' + folders.map(f => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+  // 더블워드/문자열 태그도 같은 folders 테이블을 공유해서 쓴다 — 여기서 폴더가 바뀌면
+  // 그쪽 트리/선택창도 같이 갱신.
+  if (typeof renderDwFolderTree === 'function') renderDwFolderTree();
+  const dwSel = document.getElementById('dwFolderSelect');
+  if (dwSel) dwSel.innerHTML = folders.map(f => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+  if (typeof renderStringFolderTree === 'function') renderStringFolderTree();
+  const stSel = document.getElementById('stFolderSelect');
+  if (stSel) stSel.innerHTML = folders.map(f => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
 }
 
 async function selectFolder(id) {
@@ -946,6 +954,399 @@ document.getElementById('alarmTagImportFile').addEventListener('change', async e
 });
 
 // ============================================================================
+// 3.5) 문자열 태그 (tb_string_tag) — 더블워드 태그와 마찬가지로 folders 테이블을 공유해서 폴더로 묶는다.
+//      값은 StringTagMonitorService가 30초 주기로 미리 읽어 디코딩해둔 최신값을 그대로 보여준다.
+// ============================================================================
+let stringTags = [];
+let selectedStringFolderId = 'ALL';
+let stringTagEditId = null;
+let stringTagSearch = '';
+const stringTagSort = { key: null, dir: 'asc' };
+
+// 한글 등 비아스키 문자를 쓰면 서버가 Encoding.ASCII.GetBytes에서 조용히 '?'로 바꿔버려서
+// 알아볼 수 없는 값이 PLC에 써진다 — API 왕복 없이 입력 즉시 막아 빠르게 알려준다
+// (서버도 동일 검사를 하므로 우회해서 호출해도 안전하다).
+function isAsciiOnly(s) { return /^[\x20-\x7E]*$/.test(s); }
+
+function renderStringFolderTree() {
+  const el = document.getElementById('stringFolderList');
+  if (!el) return;
+  renderFolderTree(el, folders, selectedStringFolderId, stringFolderTreeHandlers(), '(전체)');
+}
+
+function stringFolderTreeHandlers() {
+  return {
+    onSelect: f => selectStringFolder(f.id),
+    onRename: async f => {
+      const name = prompt('새 폴더 이름', f.name);
+      if (!name || name.trim() === f.name) return;
+      try { await api('PUT', `/api/admin/folders/${f.id}`, { name: name.trim(), parentId: f.parentId }); await loadFolders(); showToast('폴더 이름을 변경했습니다', 'success'); }
+      catch (e) { showToast(e.message, 'error'); }
+    },
+    onDelete: async f => {
+      let warn = `"${f.name}" 폴더를 삭제할까요?`;
+      try {
+        const { tags } = await api('GET', `/api/admin/stringtags?folderId=${f.id}`);
+        if (tags.length > 0) warn = `"${f.name}" 폴더를 삭제하면 안에 있는 문자열 태그 ${tags.length}개도 함께 삭제됩니다(복구 불가). 이 폴더를 다른 태그 종류가 같이 쓰고 있다면 그쪽도 영향받습니다. 정말 삭제할까요?`;
+      } catch (e) { /* 개수 확인 실패해도 삭제 자체는 계속 진행 가능하게 둔다 */ }
+      if (!confirm(warn)) return;
+      try {
+        await api('DELETE', `/api/admin/folders/${f.id}`);
+        if (selectedStringFolderId === f.id) selectedStringFolderId = 'ALL';
+        await loadFolders();
+        await loadStringTags();
+        showToast('폴더를 삭제했습니다', 'success');
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  };
+}
+
+async function selectStringFolder(id) {
+  selectedStringFolderId = id;
+  const f = id === 'ALL' ? null : folders.find(x => x.id === id);
+  document.getElementById('stringTagsTitle').innerHTML =
+    (id === 'ALL' ? '전체 문자열 태그' : escapeHtml(f ? f.name : '')) + ' <span class="table-tag">tb_string_tag</span>';
+  renderStringFolderTree();
+  updateStringTagExportLink();
+  await loadStringTags();
+}
+
+function updateStringTagExportLink() {
+  const qs = selectedStringFolderId === 'ALL' ? '' : `?folderId=${selectedStringFolderId}`;
+  document.getElementById('stringTagExportBtn').href = '/api/admin/stringtags/export' + qs;
+}
+document.getElementById('stringFolderAddBtn').addEventListener('click', async () => {
+  const name = prompt('새 폴더 이름');
+  if (!name || !name.trim()) return;
+  try { await api('POST', '/api/admin/folders', { name: name.trim(), parentId: null }); await loadFolders(); showToast('폴더를 추가했습니다', 'success'); }
+  catch (e) { showToast(e.message, 'error'); }
+});
+
+async function loadStringTags() {
+  const qs = selectedStringFolderId === 'ALL' ? '' : `?folderId=${selectedStringFolderId}`;
+  const { tags } = await api('GET', '/api/admin/stringtags' + qs);
+  stringTags = tags;
+  renderStringTagTable();
+}
+
+function renderStringTagTable() {
+  const body = document.getElementById('stringTagBody');
+  const view = filterAndSort(stringTags, stringTagSearch, ['tagName', 'address'], stringTagSort);
+  document.getElementById('stringTagCount').textContent = `총 ${view.length}건` + (view.length !== stringTags.length ? ` (전체 ${stringTags.length}건 중)` : '');
+  body.innerHTML = view.map(t => `
+    <tr>
+      <td class="id-col">${t.stringId}</td>
+      <td class="name-col">${escapeHtml(t.tagName)}</td>
+      <td><span class="addr">${escapeHtml(t.address)}</span></td>
+      <td class="truncate-col" title="${escapeHtml(t.plcId)}">${escapeHtml(t.plcId)}</td>
+      <td>${t.wordCount}</td>
+      <td>${t.byteOrder === 'LOW_FIRST' ? '하위바이트 먼저' : '상위바이트 먼저'}</td>
+      <td class="mono">${t.value != null && t.value !== '' ? escapeHtml(t.value) : '—'}</td>
+      <td>${badge(t.enabled)}</td>
+      <td class="row-actions">
+        <button class="row-icon-btn" data-act="usage" title="API 사용법">${ICON.info}</button>
+        <button class="row-icon-btn" data-act="write" title="값 쓰기">${ICON.wrench}</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
+      </td>
+    </tr>`).join('');
+  [...body.children].forEach((tr, i) => {
+    const t = view[i];
+    tr.querySelector('[data-act=usage]').addEventListener('click', () => openStringTagUsageModal(t));
+    tr.querySelector('[data-act=edit]').addEventListener('click', () => openStringTagModal(t));
+    tr.querySelector('[data-act=del]').addEventListener('click', async () => {
+      if (!confirm(`"${t.tagName}" 태그를 삭제할까요?`)) return;
+      try { await api('DELETE', `/api/admin/stringtags/${t.stringId}`); await loadStringTags(); showToast('태그를 삭제했습니다', 'success'); }
+      catch (e) { showToast(e.message, 'error'); }
+    });
+    tr.querySelector('[data-act=write]').addEventListener('click', async () => {
+      const value = prompt(`"${t.tagName}"에 쓸 문자열 (최대 ${t.wordCount * 2}자, 아스키 문자만 — 한글 불가)`, t.value || '');
+      if (value === null) return;
+      if (!isAsciiOnly(value)) { showToast('아스키(영문/숫자/기호) 문자만 쓸 수 있습니다 — 한글 등은 불가합니다', 'error'); return; }
+      try {
+        const result = await api('GET', `/api/admin/stringtags/write/by-name?name=${encodeURIComponent(t.tagName)}&value=${encodeURIComponent(value)}&folderId=${t.folderId}`);
+        if (result.truncated) showToast('입력한 문자열이 너무 길어 일부가 잘렸습니다(그래도 썼습니다)', 'error');
+        else showToast('값을 썼습니다', 'success');
+        await loadStringTags();
+      } catch (e) { showToast(e.message, 'error'); }
+    });
+  });
+}
+
+// 문자열 태그 하나(t)의 실제 값으로 URL 예시를 채운 "API 사용법" 모달 — 폴더 태그의
+// openTagUsageModal과 같은 모달(tagUsageModalBackdrop)을 그대로 재사용한다(제목/본문만 교체).
+function openStringTagUsageModal(t) {
+  const origin = location.origin;
+  const memTag = '<span class="table-tag">메모리</span>';
+  const writeTag = '<span class="table-tag is-write">쓰기</span>';
+
+  document.getElementById('tagUsageModalTitle').textContent = `"${t.tagName}" — API 사용법`;
+  document.getElementById('tagUsageBody').innerHTML = `
+    <p>문자열 태그는 <b>StringTagMonitorService</b>가 30초마다 미리 읽어 디코딩해둔 값을 메모리에만 들고 있습니다 — 아래 조회는 PLC와 새로 통신하지 않고 그 메모리 값을 그대로 돌려줍니다.</p>
+
+    <p><strong>① 이 태그 값 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/admin/stringtags?name=${encodeURIComponent(t.tagName)}`)}
+
+    <p><strong>② 전체 문자열 태그 목록 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/admin/stringtags`)}
+
+    <p><strong>③ 값 쓰기</strong> ${writeTag} — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작입니다. 문자열을 워드 ${t.wordCount}개(최대 ${t.wordCount * 2}자)로 인코딩해서 순서대로 씁니다.</p>
+    ${codeBlockRow(`${origin}/api/admin/stringtags/write/by-name?name=${encodeURIComponent(t.tagName)}&value=${encodeURIComponent(t.value || '')}&folderId=${t.folderId}`)}
+    <p class="field-hint">위 value 자리에 원하는 문자열을 넣어 호출하세요(URL 인코딩 필요). 등록된 워드 개수(${t.wordCount})×2자를 넘으면 뒷부분이 잘리고 <code>truncated:true</code>가 함께 옵니다. 같은 이름이 다른 폴더에도 있으면 folderId 없이는 거부되니 위처럼 항상 같이 넘기세요.</p>
+  `;
+  openModal('tagUsageModalBackdrop');
+}
+
+function openStringTagModal(editing) {
+  stringTagEditId = editing ? editing.stringId : null;
+  document.getElementById('stringTagModalTitle').textContent = editing ? '문자열 태그 수정' : '새 문자열 태그';
+  document.getElementById('stFolderSelect').value = editing ? editing.folderId : (selectedStringFolderId !== 'ALL' ? selectedStringFolderId : (folders[0] ? folders[0].id : ''));
+  document.getElementById('stNameInput').value = editing ? editing.tagName : '';
+  document.getElementById('stAddressInput').value = editing ? editing.address : '';
+  document.getElementById('stPlcSelect').value = editing ? editing.plcId : '';
+  document.getElementById('stWordCountInput').value = editing ? editing.wordCount : 8;
+  document.getElementById('stByteOrderInput').value = editing ? editing.byteOrder : 'HIGH_FIRST';
+  document.getElementById('stEnabledInput').checked = editing ? !!editing.enabled : true;
+  openModal('stringTagModalBackdrop');
+}
+document.getElementById('stringTagAddBtn').addEventListener('click', () => openStringTagModal(null));
+document.getElementById('stringTagForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    folderId: parseInt(document.getElementById('stFolderSelect').value, 10),
+    tagName: document.getElementById('stNameInput').value,
+    address: document.getElementById('stAddressInput').value,
+    plcId: document.getElementById('stPlcSelect').value,
+    wordCount: parseInt(document.getElementById('stWordCountInput').value, 10),
+    byteOrder: document.getElementById('stByteOrderInput').value,
+    enabled: document.getElementById('stEnabledInput').checked
+  };
+  try {
+    if (stringTagEditId) await api('PUT', `/api/admin/stringtags/${stringTagEditId}`, body);
+    else await api('POST', '/api/admin/stringtags', body);
+    closeModal('stringTagModalBackdrop');
+    await loadStringTags();
+    showToast('저장했습니다', 'success');
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+bindLiveSearch('stringTagSearch', () => { stringTagSearch = document.getElementById('stringTagSearch').value; renderStringTagTable(); });
+
+document.getElementById('stringTagImportBtn').addEventListener('click', () => document.getElementById('stringTagImportFile').click());
+document.getElementById('stringTagImportFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const qs = selectedStringFolderId === 'ALL' ? '' : `?folderId=${selectedStringFolderId}`;
+  try {
+    const result = await uploadFile('/api/admin/stringtags/import' + qs, fd);
+    await loadStringTags();
+    showImportResult(result);
+  } catch (e) { showToast(e.message, 'error'); }
+  e.target.value = '';
+});
+
+// ============================================================================
+// 3.6) 더블워드 태그 (dw_folders_tags) — folders 테이블을 모니터링 태그와 공유해서 폴더로 묶는다.
+//      값은 DoubleWordTagMonitorService가 30초 주기로 미리 읽어 합쳐둔 최신값을 그대로 보여준다.
+// ============================================================================
+let dwTags = [];
+let selectedDwFolderId = 'ALL';
+let dwTagEditId = null;
+let dwTagSearch = '';
+const dwTagSort = { key: null, dir: 'asc' };
+
+function renderDwFolderTree() {
+  const el = document.getElementById('dwFolderList');
+  if (!el) return;
+  renderFolderTree(el, folders, selectedDwFolderId, dwFolderTreeHandlers(), '(전체)');
+}
+
+// 폴더 자체(추가/이름변경/삭제)는 모니터링 태그와 같은 /api/admin/folders를 그대로 쓴다 —
+// folders 테이블을 공유하기 때문에 여기서 바꿔도 loadFolders()가 양쪽 트리를 함께 갱신한다.
+function dwFolderTreeHandlers() {
+  return {
+    onSelect: f => selectDwFolder(f.id),
+    onRename: async f => {
+      const name = prompt('새 폴더 이름', f.name);
+      if (!name || name.trim() === f.name) return;
+      try { await api('PUT', `/api/admin/folders/${f.id}`, { name: name.trim(), parentId: f.parentId }); await loadFolders(); showToast('폴더 이름을 변경했습니다', 'success'); }
+      catch (e) { showToast(e.message, 'error'); }
+    },
+    onDelete: async f => {
+      let warn = `"${f.name}" 폴더를 삭제할까요?`;
+      try {
+        const { tags } = await api('GET', `/api/admin/dwtags?folderId=${f.id}`);
+        if (tags.length > 0) warn = `"${f.name}" 폴더를 삭제하면 안에 있는 더블워드 태그 ${tags.length}개도 함께 삭제됩니다(복구 불가). 이 폴더를 모니터링 태그가 같이 쓰고 있다면 그쪽도 영향받습니다. 정말 삭제할까요?`;
+      } catch (e) { /* 개수 확인 실패해도 삭제 자체는 계속 진행 가능하게 둔다 */ }
+      if (!confirm(warn)) return;
+      try {
+        await api('DELETE', `/api/admin/folders/${f.id}`);
+        if (selectedDwFolderId === f.id) selectedDwFolderId = 'ALL';
+        await loadFolders();
+        await loadDwTags();
+        showToast('폴더를 삭제했습니다', 'success');
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  };
+}
+
+async function selectDwFolder(id) {
+  selectedDwFolderId = id;
+  const f = id === 'ALL' ? null : folders.find(x => x.id === id);
+  document.getElementById('dwTagsTitle').innerHTML =
+    (id === 'ALL' ? '전체 더블워드 태그' : escapeHtml(f ? f.name : '')) + ' <span class="table-tag">dw_folders_tags</span>';
+  renderDwFolderTree();
+  updateDwTagExportLink();
+  await loadDwTags();
+}
+
+function updateDwTagExportLink() {
+  const qs = selectedDwFolderId === 'ALL' ? '' : `?folderId=${selectedDwFolderId}`;
+  document.getElementById('dwTagExportBtn').href = '/api/admin/dwtags/export' + qs;
+}
+
+async function loadDwTags() {
+  const qs = selectedDwFolderId === 'ALL' ? '' : `?folderId=${selectedDwFolderId}`;
+  const { tags } = await api('GET', '/api/admin/dwtags' + qs);
+  dwTags = tags;
+  renderDwTagTable();
+}
+
+function renderDwTagTable() {
+  const body = document.getElementById('dwTagBody');
+  const empty = document.getElementById('dwTagEmpty');
+  const view = filterAndSort(dwTags, dwTagSearch, ['name', 'address'], dwTagSort);
+  document.getElementById('dwTagCount').textContent = `총 ${view.length}건` + (view.length !== dwTags.length ? ` (전체 ${dwTags.length}건 중)` : '');
+  if (view.length === 0) { body.innerHTML = ''; empty.hidden = false; return; }
+  empty.hidden = true;
+  body.innerHTML = view.map(t => `
+    <tr>
+      <td class="id-col">${t.id}</td>
+      <td class="name-col">${escapeHtml(t.name)}</td>
+      <td><span class="addr">${escapeHtml(t.address)}</span></td>
+      <td class="truncate-col" title="${escapeHtml(t.plcId)}">${escapeHtml(t.plcId)}</td>
+      <td>${t.wordCount}</td>
+      <td class="mono">${escapeHtml(t.wordOrder)}</td>
+      <td>${t.signed ? '있음' : '없음'}</td>
+      <td class="mono">${t.value != null ? t.value : '—'}</td>
+      <td>${badge(t.enabled)}</td>
+      <td class="row-actions">
+        <button class="row-icon-btn" data-act="usage" title="API 사용법">${ICON.info}</button>
+        <button class="row-icon-btn" data-act="write" title="값 쓰기">${ICON.wrench}</button>
+        <button class="row-icon-btn" data-act="edit" title="수정">${ICON.edit}</button>
+        <button class="row-icon-btn is-danger" data-act="del" title="삭제">${ICON.trash}</button>
+      </td>
+    </tr>`).join('');
+  [...body.children].forEach((tr, i) => {
+    const t = view[i];
+    tr.querySelector('[data-act=usage]').addEventListener('click', () => openDwTagUsageModal(t));
+    tr.querySelector('[data-act=edit]').addEventListener('click', () => openDwTagModal(t));
+    tr.querySelector('[data-act=del]').addEventListener('click', async () => {
+      if (!confirm(`"${t.name}" 태그를 삭제할까요?`)) return;
+      try { await api('DELETE', `/api/admin/dwtags/${t.id}`); await loadDwTags(); showToast('태그를 삭제했습니다', 'success'); }
+      catch (e) { showToast(e.message, 'error'); }
+    });
+    tr.querySelector('[data-act=write]').addEventListener('click', async () => {
+      const input = prompt(`"${t.name}"에 쓸 정수값 (${t.signed ? '부호있음' : '부호없음'}, ${t.wordCount * 16}비트)`, t.value != null ? String(t.value) : '0');
+      if (input === null) return;
+      if (!/^-?\d+$/.test(input.trim())) { showToast('정수만 입력할 수 있습니다', 'error'); return; }
+      try {
+        await api('GET', `/api/admin/dwtags/write/by-name?name=${encodeURIComponent(t.name)}&value=${encodeURIComponent(input.trim())}&folderId=${t.folderId}`);
+        showToast('값을 썼습니다', 'success');
+        await loadDwTags();
+      } catch (e) { showToast(e.message, 'error'); }
+    });
+  });
+}
+
+function openDwTagModal(editing) {
+  dwTagEditId = editing ? editing.id : null;
+  document.getElementById('dwTagModalTitle').textContent = editing ? '더블워드 태그 수정' : '새 더블워드 태그';
+  document.getElementById('dwFolderSelect').value = editing ? editing.folderId : (selectedDwFolderId !== 'ALL' ? selectedDwFolderId : (folders[0] ? folders[0].id : ''));
+  document.getElementById('dwNameInput').value = editing ? editing.name : '';
+  document.getElementById('dwAddressInput').value = editing ? editing.address : '';
+  document.getElementById('dwPlcSelect').value = editing ? editing.plcId : '';
+  document.getElementById('dwWordCountInput').value = editing ? editing.wordCount : 2;
+  document.getElementById('dwWordOrderInput').value = editing ? editing.wordOrder : '0,1';
+  document.getElementById('dwSignedInput').checked = editing ? !!editing.signed : true;
+  document.getElementById('dwEnabledInput').checked = editing ? !!editing.enabled : true;
+  openModal('dwTagModalBackdrop');
+}
+document.getElementById('dwTagAddBtn').addEventListener('click', () => openDwTagModal(null));
+document.getElementById('dwFolderAddBtn').addEventListener('click', async () => {
+  const name = prompt('새 폴더 이름');
+  if (!name || !name.trim()) return;
+  try { await api('POST', '/api/admin/folders', { name: name.trim(), parentId: null }); await loadFolders(); showToast('폴더를 추가했습니다', 'success'); }
+  catch (e) { showToast(e.message, 'error'); }
+});
+// 신규 등록 화면에서 워드 개수를 바꾸면, 아직 손대지 않은 워드 순서 기본값도 그 개수에 맞춰 다시 채운다.
+document.getElementById('dwWordCountInput').addEventListener('change', () => {
+  if (dwTagEditId) return;
+  const n = parseInt(document.getElementById('dwWordCountInput').value, 10);
+  if (n >= 2 && n <= 4) document.getElementById('dwWordOrderInput').value = Array.from({ length: n }, (_, i) => i).join(',');
+});
+document.getElementById('dwTagForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    folderId: parseInt(document.getElementById('dwFolderSelect').value, 10),
+    name: document.getElementById('dwNameInput').value,
+    address: document.getElementById('dwAddressInput').value,
+    plcId: document.getElementById('dwPlcSelect').value,
+    wordCount: parseInt(document.getElementById('dwWordCountInput').value, 10),
+    wordOrder: document.getElementById('dwWordOrderInput').value,
+    signed: document.getElementById('dwSignedInput').checked,
+    enabled: document.getElementById('dwEnabledInput').checked
+  };
+  try {
+    if (dwTagEditId) await api('PUT', `/api/admin/dwtags/${dwTagEditId}`, body);
+    else await api('POST', '/api/admin/dwtags', body);
+    closeModal('dwTagModalBackdrop');
+    await loadDwTags();
+    showToast('저장했습니다', 'success');
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+function openDwTagUsageModal(t) {
+  const origin = location.origin;
+  const memTag = '<span class="table-tag">메모리</span>';
+  const writeTag = '<span class="table-tag is-write">쓰기</span>';
+  document.getElementById('tagUsageModalTitle').textContent = `"${t.name}" — API 사용법`;
+  document.getElementById('tagUsageBody').innerHTML = `
+    <p>더블워드 태그는 <b>DoubleWordTagMonitorService</b>가 30초마다 미리 읽어 합쳐둔 값을 메모리에만 들고 있습니다 — 아래 조회는 PLC와 새로 통신하지 않고 그 메모리 값을 그대로 돌려줍니다.</p>
+
+    <p><strong>① 이 태그 값 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/admin/dwtags?name=${encodeURIComponent(t.name)}`)}
+
+    <p><strong>② 이 폴더 전체 목록 조회</strong> ${memTag}</p>
+    ${codeBlockRow(`${origin}/api/admin/dwtags?folderId=${t.folderId}`)}
+
+    <p><strong>③ 값 쓰기</strong> ${writeTag} — ⚠️ 실제 설비 PLC에 값을 내보내는 되돌릴 수 없는 동작입니다. 정수를 워드 ${t.wordCount}개로 쪼개서 순서대로 씁니다.</p>
+    ${codeBlockRow(`${origin}/api/admin/dwtags/write/by-name?name=${encodeURIComponent(t.name)}&value=${t.value != null ? t.value : 0}&folderId=${t.folderId}`)}
+    <p class="field-hint">위 value 자리에 원하는 정수를 넣어 호출하세요. ${t.signed ? '부호있는' : '부호없는'} ${t.wordCount * 16}비트 범위를 벗어나면 에러로 거부됩니다. 같은 이름이 다른 폴더에도 있으면 folderId 없이는 거부되니 위처럼 항상 같이 넘기세요.</p>
+  `;
+  openModal('tagUsageModalBackdrop');
+}
+
+bindLiveSearch('dwTagSearch', () => { dwTagSearch = document.getElementById('dwTagSearch').value; renderDwTagTable(); });
+
+document.getElementById('dwTagImportBtn').addEventListener('click', () => document.getElementById('dwTagImportFile').click());
+document.getElementById('dwTagImportFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  const qs = selectedDwFolderId === 'ALL' ? '' : `?folderId=${selectedDwFolderId}`;
+  try {
+    const result = await uploadFile('/api/admin/dwtags/import' + qs, fd);
+    await loadDwTags();
+    showImportResult(result);
+  } catch (e) { showToast(e.message, 'error'); }
+  e.target.value = '';
+});
+
+// ============================================================================
 // 4) 실시간 모니터링 — PLC를 새로 두드리지 않고 서버가 이미 폴링해서 메모리(또는 최근 스냅샷)에
 //    들고 있는 값만 주기적으로 다시 물어봐서 화면을 갱신한다. 값 자체는 서버가 2초(모니터링/알람)
 //    ·30초(온도) 주기로 이미 갱신해두므로, 여기 새로고침 주기는 "화면이 그 값을 얼마나 빨리
@@ -1264,6 +1665,11 @@ document.getElementById('chatMessages').addEventListener('click', e => {
     renderChatMessages();
   } else if (action === 'confirm') {
     runChatTurn({ messages: chatTranscript, confirm: true });
+  } else if (action === 'example') {
+    // 예시 칩 클릭 — 바로 전송하지 않고 입력창에 채우기만 한다(쓰기 예시를 실수로 바로 실행하지 않도록).
+    const input = document.getElementById('chatInput');
+    input.value = e.target.dataset.chatText || e.target.textContent.trim();
+    input.focus();
   }
 });
 
@@ -1779,16 +2185,87 @@ async function refreshMonitorTemp() {
   } catch (e) { showToast('온도 트렌드 갱신 실패: ' + e.message, 'error'); }
 }
 
+// 문자열 태그 관리 탭(GET /api/admin/stringtags)과 같은 엔드포인트를 그대로 재사용한다 —
+// 값 자체가 StringTagMonitorService의 메모리 캐시라 여기서 다시 조회해도 PLC 통신은 없다.
+async function refreshMonitorString() {
+  try {
+    const { tags, lastPollAt } = await api('GET', '/api/admin/stringtags');
+    const body = document.getElementById('monStringBody');
+    const empty = document.getElementById('monStringEmpty');
+    document.getElementById('monStringCount').textContent = `총 ${tags.length}건`;
+    document.getElementById('monStringUpdatedAt').textContent = formatUpdatedAt(lastPollAt);
+    if (tags.length === 0) { body.innerHTML = ''; empty.hidden = false; return; }
+    empty.hidden = true;
+    body.innerHTML = tags.map(t => `
+      <tr>
+        <td class="id-col">${t.stringId}</td>
+        <td class="name-col">${escapeHtml(t.tagName)}</td>
+        <td><span class="addr">${escapeHtml(t.address)}</span></td>
+        <td class="truncate-col" title="${escapeHtml(t.plcId)}">${escapeHtml(t.plcId)}</td>
+        <td class="mono is-dblclick-write" data-string-id="${t.stringId}" title="더블클릭하면 값을 쓸 수 있습니다">${t.value != null && t.value !== '' ? escapeHtml(t.value) : '—'}</td>
+      </tr>`).join('');
+    [...body.children].forEach((tr, i) => {
+      const t = tags[i];
+      tr.querySelector('.is-dblclick-write').addEventListener('dblclick', async () => {
+        const value = prompt(`"${t.tagName}"에 쓸 문자열 (최대 ${t.wordCount * 2}자, 아스키 문자만 — 한글 불가)`, t.value || '');
+        if (value === null) return;
+        if (!isAsciiOnly(value)) { showToast('아스키(영문/숫자/기호) 문자만 쓸 수 있습니다 — 한글 등은 불가합니다', 'error'); return; }
+        try {
+          const result = await api('GET', `/api/admin/stringtags/write/by-name?name=${encodeURIComponent(t.tagName)}&value=${encodeURIComponent(value)}&folderId=${t.folderId}`);
+          if (result.truncated) showToast('입력한 문자열이 너무 길어 일부가 잘렸습니다(그래도 썼습니다)', 'error');
+          else showToast('값을 썼습니다', 'success');
+          await refreshMonitorString();
+        } catch (e) { showToast(e.message, 'error'); }
+      });
+    });
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function refreshMonitorDw() {
+  try {
+    const { tags, lastPollAt } = await api('GET', '/api/admin/dwtags');
+    const body = document.getElementById('monDwBody');
+    const empty = document.getElementById('monDwEmpty');
+    document.getElementById('monDwCount').textContent = `총 ${tags.length}건`;
+    document.getElementById('monDwUpdatedAt').textContent = formatUpdatedAt(lastPollAt);
+    if (tags.length === 0) { body.innerHTML = ''; empty.hidden = false; return; }
+    empty.hidden = true;
+    body.innerHTML = tags.map(t => `
+      <tr>
+        <td class="id-col">${t.id}</td>
+        <td class="name-col">${escapeHtml(t.name)}</td>
+        <td><span class="addr">${escapeHtml(t.address)}</span></td>
+        <td class="truncate-col" title="${escapeHtml(t.plcId)}">${escapeHtml(t.plcId)}</td>
+        <td class="mono is-dblclick-write" data-dw-id="${t.id}" title="더블클릭하면 값을 쓸 수 있습니다">${t.value != null ? t.value : '—'}</td>
+      </tr>`).join('');
+    [...body.children].forEach((tr, i) => {
+      const t = tags[i];
+      tr.querySelector('.is-dblclick-write').addEventListener('dblclick', async () => {
+        const input = prompt(`"${t.name}"에 쓸 정수값 (${t.signed ? '부호있음' : '부호없음'}, ${t.wordCount * 16}비트)`, t.value != null ? String(t.value) : '0');
+        if (input === null) return;
+        if (!/^-?\d+$/.test(input.trim())) { showToast('정수만 입력할 수 있습니다', 'error'); return; }
+        try {
+          await api('GET', `/api/admin/dwtags/write/by-name?name=${encodeURIComponent(t.name)}&value=${encodeURIComponent(input.trim())}&folderId=${t.folderId}`);
+          showToast('값을 썼습니다', 'success');
+          await refreshMonitorDw();
+        } catch (e) { showToast(e.message, 'error'); }
+      });
+    });
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
 async function refreshAllMonitor() {
   if (!isMonitorTabActive()) return;
-  await Promise.all([refreshMonitorFolder(), refreshMonitorAlarm(), refreshMonitorTemp()]);
+  await Promise.all([refreshMonitorFolder(), refreshMonitorAlarm(), refreshMonitorTemp(), refreshMonitorString(), refreshMonitorDw()]);
   refreshWriteLog();
 }
 
-// 값 자체는 서버가 2초/30초 주기로 이미 갱신해두므로, 화면 새로고침은 그보다 약간 여유있게 잡는다
-// (모니터링·알람은 2.5초 — 서버 폴링 주기와 거의 맞춤, 온도는 1분 — 화면 로드 후 요청된 주기).
-setInterval(() => { if (isMonitorTabActive()) { refreshMonitorFolder(); refreshMonitorAlarm(); refreshWriteLog(); } }, 2500);
+// 값 자체는 서버가 2초/30초 주기로 이미 갱신해두므로, 화면 새로고침은 그 주기에 맞춘다
+// (모니터링·알람은 2초 — 서버 폴링 주기(PlcMonitor:IntervalMs)와 동일, 온도·문자열은 1분 — 화면 로드 후 요청된 주기).
+setInterval(() => { if (isMonitorTabActive()) { refreshMonitorFolder(); refreshMonitorAlarm(); refreshWriteLog(); } }, 2000);
 setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 60000);
+setInterval(() => { if (isMonitorTabActive()) refreshMonitorString(); }, 60000);
+setInterval(() => { if (isMonitorTabActive()) refreshMonitorDw(); }, 60000);
 
 // ============================================================================
 // 초기 로딩
@@ -1799,6 +2276,8 @@ setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 60000);
   setupSortableHeaders('folderTagTable', folderTagSort, renderFolderTagTable);
   setupSortableHeaders('tempTagTable', tempTagSort, renderTempTagTable);
   setupSortableHeaders('alarmTagTable', alarmTagSort, renderAlarmTagTable);
+  setupSortableHeaders('stringTagTable', stringTagSort, renderStringTagTable);
+  setupSortableHeaders('dwTagTable', dwTagSort, renderDwTagTable);
 
   try {
     await loadPlcOptions();
@@ -1818,6 +2297,8 @@ setInterval(() => { if (isMonitorTabActive()) refreshMonitorTemp(); }, 60000);
     populateMonitorAlarmFolderSelect();
     // 실시간 모니터링의 알람 서브탭은 "전체"(238개) 대신 첫 폴더로 좁혀서 시작한다 — 그게 더 쓸모있다.
     if (alarmFolders.length > 0) document.getElementById('monAlarmFolderSelect').value = alarmFolders[0].id;
+    await selectStringFolder('ALL');
+    await selectDwFolder('ALL');
     await refreshPollStatus();          // PLC 관리가 기본 진입 탭이라 첫 화면부터 바로 채워준다
   } catch (e) {
     showToast('초기 로딩 실패: ' + e.message, 'error');
